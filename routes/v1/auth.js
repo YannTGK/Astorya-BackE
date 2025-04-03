@@ -1,5 +1,5 @@
 import express from 'express';
-import User from 'models/v1/User.js';
+import User from '../../models/v1/User.js';
 import jwt from 'jsonwebtoken';
 import verifyToken from '../../middleware/v1/authMiddleware.js'; // ✅ import this
 const router = express.Router();
