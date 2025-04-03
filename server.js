@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 
 import authRoutes from "./routes/v1/auth.js";
+import uploadPhotoRoutes from "./routes/v1/uploadPhoto.js"
 dotenv.config();
 
 const app = express();
@@ -20,6 +21,8 @@ mongoose
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
 app.use("/api/auth", authRoutes);
+app.use("/api/auth", uploadPhotoRoutes);
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);

@@ -1,8 +1,7 @@
 import express from 'express';
-import User from '../../models/v1/User.js';
+import User from 'models/v1/User.js';
 import jwt from 'jsonwebtoken';
 import verifyToken from '../../middleware/v1/authMiddleware.js'; // ✅ import this
-
 const router = express.Router();
 
 // REGISTER
@@ -83,5 +82,7 @@ router.get('/me', verifyToken, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 export default router;
