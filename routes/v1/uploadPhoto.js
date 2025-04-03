@@ -10,6 +10,8 @@ import User from "../../models/v1/User.js";
 const router = express.Router();
 const upload = multer({ dest: "uploads/temp/" });
 
+console.log("📸 UploadPhoto route loaded");
+
 router.post("/upload-photo", verifyToken, upload.single("photo"), async (req, res) => {
   try {
     const file = req.file;
