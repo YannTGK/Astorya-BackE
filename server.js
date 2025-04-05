@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/v1/auth.js";
 import uploadPhotoRoutes from "./routes/v1/uploadPhoto.js";
 import uploadVideoRoutes from "./routes/v1/uploadVideo.js"; // <-- nieuw toegevoegd
+import uploadAudioRoutes from "./routes/v1/uploadAudio.js"; // <-- nieuw toegevoegd
 
 dotenv.config();
 
@@ -37,6 +38,7 @@ mongoose
 app.use("/api/auth", authRoutes);            // login, register, etc.
 app.use("/api/auth", uploadPhotoRoutes);     // /upload-photo
 app.use("/api/auth", uploadVideoRoutes);     // /upload-video
+app.use("/api/auth", uploadAudioRoutes);     // /upload-audio
 
 // Start server
 app.listen(PORT, () => {

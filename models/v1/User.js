@@ -19,7 +19,13 @@ const UserSchema = new mongoose.Schema({
       url: String,
       uploadedAt: Date,
     }
-  ]
+  ],
+  audios: [
+    {
+      url: String,
+      uploadedAt: Date,
+    }
+  ],
 });
 
 // 🔐 Hash password voor opslag
