@@ -1,4 +1,8 @@
 import AWS from 'aws-sdk';
+import dotenv from 'dotenv';
+
+dotenv.config();
+console.log("✅ Wasabi key loaded:", process.env.WASABI_ACCESS_KEY);
 
 const wasabi = new AWS.S3({
   endpoint: new AWS.Endpoint('s3.eu-central-1.wasabisys.com'),

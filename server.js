@@ -7,6 +7,10 @@ import authRoutes from "./routes/v1/auth.js";
 import uploadPhotoRoutes from "./routes/v1/uploadPhoto.js"
 dotenv.config();
 
+console.log("🔑 WASABI_ACCESS_KEY:", process.env.WASABI_ACCESS_KEY);
+console.log("🔑 WASABI_SECRET_KEY:", process.env.WASABI_SECRET_KEY);
+console.log("🪣 WASABI_BUCKET_NAME:", process.env.WASABI_BUCKET_NAME);
+
 const app = express();
 app.use((req, res, next) => {
   console.log(`➡️ [${req.method}] ${req.url}`);

@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import gm from "gm";
+import gmModule from "gm";
 import fs from "fs";
 import path from "path";
 import wasabi from "../../utils/wasabiClient.js";
@@ -9,6 +9,7 @@ import User from "../../models/v1/User.js";
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/temp/" });
+const gm = gmModule.subClass({ imageMagick: true });
 
 console.log("📸 UploadPhoto route loaded");
 
