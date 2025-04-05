@@ -13,6 +13,12 @@ const UserSchema = new mongoose.Schema({
       url: String,
       uploadedAt: Date,
     }
+  ],
+  videos: [
+    {
+      url: String,
+      uploadedAt: Date,
+    }
   ]
 });
 
