@@ -4,21 +4,16 @@ import cors from "cors";
 import dotenv from "dotenv";
 
 // Route imports
-import authRoutes from "./routes/v1/auth.js";
-import uploadPhotoRoutes from "./routes/v1/uploadPhoto.js";
-import uploadVideoRoutes from "./routes/v1/uploadVideo.js"; // <-- nieuw toegevoegd
-import uploadAudioRoutes from "./routes/v1/uploadAudio.js"; // <-- nieuw toegevoegd
+import authRoutes from "./routes/v2/auth.js";
+import starRoutes from "./routes/v2/stars.js";
+import photoAlbumRoutes from "./routes/v2/photoAlbums.js";
+import photoRoutes from "./routes/v2/photos.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 const MONGO_URI = process.env.MONGO_URI;
-
-// Debugging logs (optioneel verwijderen in productie)
-console.log("🔑 WASABI_ACCESS_KEY:", process.env.WASABI_ACCESS_KEY);
-console.log("🔑 WASABI_SECRET_KEY:", process.env.WASABI_SECRET_KEY);
-console.log("🪣 WASABI_BUCKET_NAME:", process.env.WASABI_BUCKET_NAME);
 
 // Middleware
 app.use(cors());
@@ -35,11 +30,10 @@ mongoose
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
 // Routes
-app.use("/api/auth", authRoutes);            // login, register, etc.
-app.use("/api/auth", uploadPhotoRoutes);     // /upload-photo
-app.use("/api/auth", uploadVideoRoutes);     // /upload-video
-app.use("/api/auth", uploadAudioRoutes);     // /upload-audio
-
+app.use("/api/auth", authRoutes);
+app.use("/api/stars", starRoutes);
+app.use("/api/photo-albums", photoAlbumRoutes);
+app.use("/api/photos", photoRoutes);
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
