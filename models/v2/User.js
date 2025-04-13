@@ -29,8 +29,5 @@ userSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Mongoose indexen (optioneel als je ze niet al in je schema hebt)
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ username: 1 }, { unique: true });
 
 export default mongoose.model('User', userSchema);
