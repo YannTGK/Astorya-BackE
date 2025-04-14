@@ -5,7 +5,9 @@ import dotenv from "dotenv";
 
 // Route imports
 import authRoutes from "./routes/v2/auth.js";
+import userRoutes from "./routes/v2/user.js"
 import starRoutes from "./routes/v2/stars.js";
+import vrRoomsRoutes from "./routes/v2/vrRooms.js";
 import photoAlbumRoutes from "./routes/v2/photoAlbums.js";
 import photoRoutes from "./routes/v2/photos.js";
 
@@ -31,7 +33,10 @@ mongoose
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/stars", starRoutes);
+app.use('/api/stars/:starId/vr-rooms', vrRoomsRoutes);
+app.use('/api/vrRooms', vrRoomsRoutes);
 app.use("/api/photo-albums", photoAlbumRoutes);
 app.use("/api/photos", photoRoutes);
 // Start server

@@ -1,24 +1,23 @@
-// routes/stars.js
 import express from 'express';
-import Star from '../../models/v2/Star.js'; // Zorg ervoor dat je het juiste pad gebruikt
+import Star from '../../models/v2/Star.js';
 import verifyToken from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router();
 
-// GET /stars - haal alle sterren van de ingelogde user
+// GET alle sterren van ingelogde gebruiker
 router.get('/', verifyToken, async (req, res) => {
   try {
     const stars = await Star.find({ userId: req.user.userId });
     res.json(stars);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-// POST /stars - maak een nieuwe ster voor de user
+// POST nieuwe ster aanmaken
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { isPrivate, starFor, color, word, activationDate } = req.body;
+    const { isPrivate, starFor, color, word, activationDate, longTermMaintenance } = req.body;
     const newStar = await Star.create({
       userId: req.user.userId,
       isPrivate,
@@ -26,65 +25,62 @@ router.post('/', verifyToken, async (req, res) => {
       color,
       word,
       activationDate,
+      longTermMaintenance,
     });
     res.status(201).json(newStar);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({ message: 'Could not create star', error: err.message });
   }
 });
 
-// GET /stars/:id - detail van één ster
+// GET detail van één ster (alleen eigenaar)
 router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const star = await Star.findById(req.params.id);
-    if (!star) return res.status(404).json({ message: 'Star not found' });
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    const star = await Star.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!star) {
+      return res.status(404).json({ message: 'Star not found' });
     }
     res.json(star);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-// PUT /stars/:id
+// PUT ster updaten (alleen eigenaar)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const star = await Star.findById(req.params.id);
-    if (!star) return res.status(404).json({ message: 'Star not found' });
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    const updateFields = {
+      ...req.body,
+      updatedAt: new Date(),
+    };
+
+    const updatedStar = await Star.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.userId },
+      updateFields,
+      { new: true }
+    );
+
+    if (!updatedStar) {
+      return res.status(404).json({ message: 'Star not found or forbidden' });
     }
 
-    // Update de velden
-    const { isPrivate, starFor, color, word, activationDate } = req.body;
-    if (isPrivate !== undefined) star.isPrivate = isPrivate;
-    if (starFor) star.starFor = starFor;
-    if (color) star.color = color;
-    if (word) star.word = word;
-    if (activationDate) star.activationDate = activationDate;
-    star.updatedAt = new Date();
-
-    await star.save();
-    res.json(star);
+    res.json(updatedStar);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({ message: 'Could not update star', error: err.message });
   }
 });
 
-// DELETE /stars/:id
+// DELETE ster verwijderen (alleen eigenaar)
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const star = await Star.findById(req.params.id);
-    if (!star) return res.status(404).json({ message: 'Star not found' });
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
+    const deletedStar = await Star.findOneAndDelete({ _id: req.params.id, userId: req.user.userId });
+    if (!deletedStar) {
+      return res.status(404).json({ message: 'Star not found or forbidden' });
     }
-
-    await star.remove();
-    res.json({ message: 'Star removed' });
+    res.json({ message: 'Star deleted' });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('Delete error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
