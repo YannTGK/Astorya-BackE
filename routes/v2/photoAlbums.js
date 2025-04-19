@@ -1,108 +1,96 @@
-// routes/photoAlbums.js
 import express from 'express';
 import PhotoAlbum from '../../models/v2/PhotoAlbum.js';
-import Star from "../../models/v2/Star.js"
+import Star       from '../../models/v2/Star.js';
 import verifyToken from '../../middleware/v1/authMiddleware.js';
 
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
 
-// GET /photo-albums?starId=...
+/* ---------- Geneste endpoints onder /stars/:starId/photo-albums ---------- */
+
+// GET alle albums van een ster
 router.get('/', verifyToken, async (req, res) => {
-  const { starId } = req.query;
-  try {
-    // Controleer of de star van de user is
-    const star = await Star.findById(starId);
-    if (!star) return res.status(404).json({ message: 'Star not found' });
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
+  const { starId } = req.params;
+  if (!starId) return res.status(400).json({ message: 'Missing starId' });
 
+  const star = await Star.findOne({ _id: starId, userId: req.user.userId });
+  if (!star) return res.status(404).json({ message: 'Star not found or forbidden' });
+
+  try {
     const albums = await PhotoAlbum.find({ starId });
     res.json(albums);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-// POST /photo-albums
+// POST nieuw album
 router.post('/', verifyToken, async (req, res) => {
-  const { starId, name, sharedWith } = req.body;
-  try {
-    // check star ownership
-    const star = await Star.findById(starId);
-    if (!star) return res.status(404).json({ message: 'Star not found' });
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
+  const { starId } = req.params;
+  if (!starId) return res.status(400).json({ message: 'Missing starId' });
 
-    const newAlbum = await PhotoAlbum.create({
-      starId,
-      name,
-      sharedWith: sharedWith || [],
-    });
-    res.status(201).json(newAlbum);
+  const star = await Star.findOne({ _id: starId, userId: req.user.userId });
+  if (!star) return res.status(404).json({ message: 'Star not found or forbidden' });
+
+  try {
+    const { name, sharedWith } = req.body;
+    const album = await PhotoAlbum.create({ starId, name, sharedWith });
+    res.status(201).json(album);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({ message: 'Could not create album', error: err.message });
   }
 });
 
-// GET /photo-albums/:id
-router.get('/:id', verifyToken, async (req, res) => {
+/* ---------- Detail‑endpoints onder /photo-albums/detail/:id ---------- */
+
+// GET album‑detail
+router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
     const album = await PhotoAlbum.findById(req.params.id);
     if (!album) return res.status(404).json({ message: 'Album not found' });
 
-    // check ownership
-    const star = await Star.findById(album.starId);
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
+    const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
+    if (!star) return res.status(403).json({ message: 'Forbidden' });
 
     res.json(album);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-// PUT /photo-albums/:id
-router.put('/:id', verifyToken, async (req, res) => {
+// PUT album updaten
+router.put('/detail/:id', verifyToken, async (req, res) => {
   try {
     const album = await PhotoAlbum.findById(req.params.id);
     if (!album) return res.status(404).json({ message: 'Album not found' });
 
-    // check ownership
-    const star = await Star.findById(album.starId);
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
+    const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
+    if (!star) return res.status(403).json({ message: 'Forbidden' });
 
     const { name, sharedWith } = req.body;
-    if (name) album.name = name;
+    if (name !== undefined) album.name = name;
     if (sharedWith) album.sharedWith = sharedWith;
     album.updatedAt = new Date();
-    await album.save();
 
+    await album.save();
     res.json(album);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({ message: 'Could not update album', error: err.message });
   }
 });
 
-// DELETE /photo-albums/:id
-router.delete('/:id', verifyToken, async (req, res) => {
+// DELETE album
+router.delete('/detail/:id', verifyToken, async (req, res) => {
   try {
     const album = await PhotoAlbum.findById(req.params.id);
     if (!album) return res.status(404).json({ message: 'Album not found' });
 
-    const star = await Star.findById(album.starId);
-    if (!star.userId.equals(req.user.userId)) {
-      return res.status(403).json({ message: 'Forbidden' });
-    }
+    const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
+    if (!star) return res.status(403).json({ message: 'Forbidden' });
 
-    await album.remove();
+    await album.deleteOne();               // moderne methode
     res.json({ message: 'Album deleted' });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
