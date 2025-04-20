@@ -13,6 +13,8 @@ import photosRoutes from "./routes/v2/photos.js";
 import videoAlbumsRoutes from "./routes/v2/videoAlbums.js";
 import videosRoutes from "./routes/v2/video.js";
 import audioRoutes from "./routes/v2/audios.js";
+import messagesRoutes from "./routes/v2/messages.js"
+import documentsRoutes from "./routes/v2/documents.js"
 
 
 dotenv.config();
@@ -48,7 +50,8 @@ app.use('/api/photos', photosRoutes );
 app.use('/api/stars/:starId/video-albums', videoAlbumsRoutes);
 app.use("/api/stars/:starId/video-albums/:albumId/videos", videosRoutes); 
 app.use('/api/stars/:starId/audios', audioRoutes);
-
+app.use('/api/stars/:starId/messages', messagesRoutes);
+app.use('/api/stars/:starId/documents', documentsRoutes);
 
 // Start server
 app.listen(PORT, () => {
