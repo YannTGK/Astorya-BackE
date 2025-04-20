@@ -9,6 +9,11 @@ import userRoutes from "./routes/v2/user.js"
 import starRoutes from "./routes/v2/stars.js";
 import vrRoomsRoutes from "./routes/v2/vrRooms.js";
 import photoAlbumsRoutes from "./routes/v2/photoAlbums.js";
+import photosRoutes from "./routes/v2/photos.js";  
+import videoAlbumsRoutes from "./routes/v2/videoAlbums.js";
+import videosRoutes from "./routes/v2/video.js";
+import audioRoutes from "./routes/v2/audios.js";
+
 
 dotenv.config();
 
@@ -38,6 +43,13 @@ app.use('/api/stars/:starId/vr-rooms', vrRoomsRoutes);
 app.use('/api/vrRooms', vrRoomsRoutes);
 app.use('/api/stars/:starId/photo-albums', photoAlbumsRoutes);
 app.use('/api/photo-albums', photoAlbumsRoutes);
+app.use('/api/stars/:starId/photo-albums/:albumId/photos', photosRoutes);
+app.use('/api/photos', photosRoutes );
+app.use('/api/stars/:starId/video-albums', videoAlbumsRoutes);
+app.use("/api/stars/:starId/video-albums/:albumId/videos", videosRoutes); 
+app.use('/api/stars/:starId/audios', audioRoutes);
+
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);

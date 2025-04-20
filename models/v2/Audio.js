@@ -1,13 +1,12 @@
-// models/Audio.js
 import mongoose from 'mongoose';
 
 const audioSchema = new mongoose.Schema({
-  starId: { type: mongoose.Schema.Types.ObjectId, ref: 'Star' },
-  title: String,
-  description: String,
-  fileUrl: String,
-  sharedWith: [{ type: String }], // E-mails of user-ids
-  uploadedAt: { type: Date, default: Date.now },
+  starId: { type: mongoose.Schema.Types.ObjectId, ref: 'Star', required: true },
+  title: { type: String },
+  description: { type: String },
+  fileUrl: { type: String, required: true },
+  sharedWith: { type: [String], default: [] },
+  addedAt: { type: Date, default: Date.now },
 });
 
 audioSchema.index({ starId: 1 });
