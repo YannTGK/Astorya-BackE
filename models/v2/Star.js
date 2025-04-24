@@ -7,6 +7,7 @@ const starSchema = new mongoose.Schema({
   starFor: { type: String, default: 'myself' }, // of 'lovedOne' etc.
   color: String,
   word: String,
+  publicName: String,
   activationDate: Date,
   longTermMaintenance: { type: Boolean, default: false },
 

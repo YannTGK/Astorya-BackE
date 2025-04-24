@@ -17,13 +17,14 @@ router.get('/', verifyToken, async (req, res) => {
 // POST nieuwe ster aanmaken
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { isPrivate, starFor, color, word, activationDate, longTermMaintenance } = req.body;
+    const { isPrivate, starFor, color, word, publicName, activationDate, longTermMaintenance } = req.body;
     const newStar = await Star.create({
       userId: req.user.userId,
       isPrivate,
       starFor,
       color,
       word,
+      publicName,
       activationDate,
       longTermMaintenance,
     });
