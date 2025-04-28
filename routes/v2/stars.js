@@ -1,5 +1,6 @@
 import express from 'express';
 import Star from '../../models/v2/Star.js';
+import User from '../../models/v2/User.js';
 import verifyToken from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router();
@@ -58,19 +59,47 @@ router.get('/dedicate', verifyToken, async (req, res) => {
   }
 });
 
-// GET detail van één ster (alleen eigenaar)
-router.get('/:id', verifyToken, async (req, res) => {
+/**
+ * GET /stars/:id
+ * Geeft de ster + beperkte user-info terug.
+ * Alleen de eigenaar of iemand in canView/canEdit mag dit zien
+ * (pas de authorisatie-check eventueel nog aan).
+ */
+router.get("/:id", verifyToken, async (req, res) => {
   try {
-    const star = await Star.findOne({ _id: req.params.id, userId: req.user.userId });
+    const starId = req.params.id;
+
+    // 2️⃣  ster ophalen
+    const star = await Star.findById(starId);
     if (!star) {
-      return res.status(404).json({ message: 'Star not found' });
+      return res.status(404).json({ message: "Star not found" });
     }
-    res.json(star);
+
+    // 3️⃣  basale access-check – pas aan zoals jij wilt
+    const me = req.user.userId;
+    const isOwner   = String(star.userId) === me;
+    const canView   = star.canView?.includes(me);
+    const canEdit   = star.canEdit?.includes(me);
+
+    if (!isOwner && !canView && !canEdit) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    // 4️⃣  user ophalen (enkel velden die je nodig hebt)
+    const user = await User.findById(star.userId)
+      .select("firstName lastName email plan");
+
+    // 5️⃣  gecombineerde response
+    res.json({
+      star,
+      owner: user,                 // zo kun je op het scherm voor- en achternaam tonen
+      rights: { isOwner, canView, canEdit },
+    });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error("GET /stars/:id error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
-
 
 
 // PUT ster updaten (alleen eigenaar)
