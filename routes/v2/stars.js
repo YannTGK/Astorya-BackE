@@ -76,15 +76,27 @@ router.get('/:id', verifyToken, async (req, res) => {
 // PUT ster updaten (alleen eigenaar)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
+    const { isPrivate, starFor, color, word, publicName, activationDate, longTermMaintenance, canView, canEdit } = req.body;
+
     const updateFields = {
-      ...req.body,
-      updatedAt: new Date(),
+      updatedAt: new Date(), // altijd bijwerken
     };
 
+    // Voeg enkel toe wat effectief aanwezig is in req.body
+    if (typeof isPrivate !== "undefined") updateFields.isPrivate = isPrivate;
+    if (typeof starFor !== "undefined") updateFields.starFor = starFor;
+    if (typeof color !== "undefined") updateFields.color = color;
+    if (typeof word !== "undefined") updateFields.word = word;
+    if (typeof publicName !== "undefined") updateFields.publicName = publicName;
+    if (typeof activationDate !== "undefined") updateFields.activationDate = activationDate;
+    if (typeof longTermMaintenance !== "undefined") updateFields.longTermMaintenance = longTermMaintenance;
+    if (typeof canView !== "undefined") updateFields.canView = canView;
+    if (typeof canEdit !== "undefined") updateFields.canEdit = canEdit;
+
     const updatedStar = await Star.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user.userId },
+      { _id: req.params.id, userId: req.user.userId }, // alleen eigenaar kan updaten
       updateFields,
-      { new: true }
+      { new: true } // retourneer de nieuwe versie
     );
 
     if (!updatedStar) {
@@ -93,6 +105,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     res.json(updatedStar);
   } catch (err) {
+    console.error('Update error:', err);
     res.status(400).json({ message: 'Could not update star', error: err.message });
   }
 });
