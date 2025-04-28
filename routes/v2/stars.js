@@ -34,6 +34,16 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
+router.get("/dedicate", async (req, res) => {
+  try {
+    const stars = await Star.find({ starFor: "dedicate" }); // << LET OP DIT
+    res.json(stars);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 // GET detail van één ster (alleen eigenaar)
 router.get('/:id', verifyToken, async (req, res) => {
   try {
@@ -47,15 +57,7 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-router.get("/dedicate", async (req, res) => {
-  try {
-    const stars = await Star.find({ starFor: "dedicate" }); // << LET OP DIT
-    res.json(stars);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
+
 
 // PUT ster updaten (alleen eigenaar)
 router.put('/:id', verifyToken, async (req, res) => {
