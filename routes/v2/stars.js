@@ -47,14 +47,13 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Nieuwe route: haal alle dedicate sterren op
 router.get("/dedicate", async (req, res) => {
   try {
-    const stars = await Star.find({ starFor: "dedicate" });
+    const stars = await Star.find({ starFor: "dedicate" }); // << LET OP DIT
     res.json(stars);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
