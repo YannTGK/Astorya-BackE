@@ -34,13 +34,16 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-router.get("/dedicate", async (req, res) => {
+router.get('/dedicate', verifyToken, async (req, res) => {
   try {
-    const stars = await Star.find({ starFor: "dedicate" }); // << LET OP DIT
+    const stars = await Star.find({
+      userId: req.user.userId,   // alleen jouw sterren
+      starFor: "dedicate",       // en alleen 'dedicate' type
+    });
     res.json(stars);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
