@@ -14,10 +14,11 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// POST nieuwe ster aanmaken
+// routes/stars.js
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { isPrivate, starFor, color, word, publicName, activationDate, longTermMaintenance } = req.body;
+    const { isPrivate, starFor, color, word, publicName, activationDate, longTermMaintenance, canView, canEdit } = req.body;
+
     const newStar = await Star.create({
       userId: req.user.userId,
       isPrivate,
@@ -27,19 +28,29 @@ router.post('/', verifyToken, async (req, res) => {
       publicName,
       activationDate,
       longTermMaintenance,
+      canView,  // Gebruikers die mogen kijken
+      canEdit,  // Gebruikers die mogen bewerken
     });
+
     res.status(201).json(newStar);
   } catch (err) {
     res.status(400).json({ message: 'Could not create star', error: err.message });
   }
 });
 
+// routes/stars.js
 router.get('/dedicate', verifyToken, async (req, res) => {
   try {
+    const userId = req.user.userId; // ingelogde gebruiker
     const stars = await Star.find({
-      userId: req.user.userId,   // alleen jouw sterren
-      starFor: "dedicate",       // en alleen 'dedicate' type
+      starFor: "dedicate",
+      $or: [
+        { userId: userId },         // sterren die van jou zijn
+        { canView: userId },         // sterren die jij mag bekijken
+        { canEdit: userId },         // sterren die jij mag bewerken
+      ]
     });
+
     res.json(stars);
   } catch (error) {
     console.error(error);
