@@ -29,7 +29,6 @@ const userSchema = new mongoose.Schema(
     password: {
       type:     String,
       required: true,
-      select:   false,          // 🔒 niet mee-selecten tenzij expliciet .select("+password")
     },
 
     isAlive: { type: Boolean, default: true },
