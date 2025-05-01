@@ -1,25 +1,27 @@
-// models/Star.js
-import mongoose from 'mongoose';
+// models/v2/Star.js
+import mongoose from "mongoose";
 
 const starSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // eigenaar van de ster
-  isPrivate: { type: Boolean, default: false },
-  starFor: { type: String, default: 'myself' }, // van wie is de ster: 'myself', 'lovedOne', etc.
-  color: String,
-  word: String,
-  publicName: String,
-  activationDate: Date,
-  longTermMaintenance: { type: Boolean, default: false },
+  userId:            { type: mongoose.Schema.Types.ObjectId, ref: "User" },   // eigenaar
+  isPrivate:         { type: Boolean,   default: false },
+  starFor:           { type: String,    default: "myself" },
+  color:             String,
+  word:              String,
+  publicName:        String,
+  activationDate:    Date,
+  longTermMaintenance:{ type: Boolean,  default: false },
 
-  // Nieuwe velden voor gedeelde toegang
-  canView: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // gebruikers die mogen bekijken
-  canEdit: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // gebruikers die mogen bewerken
+  /* gedeelde rechten */
+  canView: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  canEdit: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-// Index om snel sterren per user op te halen
+/* indices voor snelle queries – belangrijk als lijsten groter worden */
 starSchema.index({ userId: 1 });
+starSchema.index({ canView: 1 });
+starSchema.index({ canEdit: 1 });
 
-export default mongoose.model('Star', starSchema);
+export default mongoose.model("Star", starSchema);
