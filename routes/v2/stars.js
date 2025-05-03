@@ -14,12 +14,14 @@ const visibleToMe = (me) => ({
   $or: [{ userId: me }, { canView: me }, { canEdit: me }],
 });
 
-const canSee   = (star, me) => visibleToMe(me).$or.some((c) => c[Object.keys(c)[0]].toString() === String(star.userId) ||
-                                                              star.canView?.some((u) => String(u) === me) ||
-                                                              star.canEdit?.some((u) => String(u) === me));
+const canSee  = (star, me) =>
+  String(star.userId) === me ||
+  star.canView?.some((u) => String(u) === me) ||
+  star.canEdit?.some((u) => String(u) === me);
 
-const canEdit  = (star, me) => String(star.userId) === me ||
-                               star.canEdit?.some((u) => String(u) === me);
+const canEdit = (star, me) =>
+  String(star.userId) === me ||
+  star.canEdit?.some((u) => String(u) === me);
 
 /*───────────────────────── 1. LIJSTEN ──────────────────────*/
 
@@ -30,7 +32,7 @@ router.get("/", verifyToken, async (req, res) => {
   try {
     const me    = toId(req.user.userId);
     const stars = await Star.find(visibleToMe(me));
-    res.json(stars);                     // ← terug naar de “oude” vorm
+    res.json(stars);
   } catch (err) {
     console.error("★ list error:", err);
     res.status(500).json({ message: "Server error" });
@@ -47,7 +49,7 @@ router.get("/dedicate", verifyToken, async (req, res) => {
       starFor: "dedicate",
       ...visibleToMe(me),
     });
-    res.json(stars);                     // ← ook hier: plain array
+    res.json(stars);
   } catch (err) {
     console.error("★ dedicate error:", err);
     res.status(500).json({ message: "Server error" });
@@ -80,7 +82,8 @@ router.get("/:id", verifyToken, async (req, res) => {
     if (!canSee(star, req.user.userId))
       return res.status(403).json({ message: "Forbidden" });
 
-    const owner = await User.findById(star.userId).select("username firstName lastName");
+    const owner = await User.findById(star.userId)
+                            .select("username firstName lastName");
     res.json({ star, owner });
   } catch (err) {
     console.error("★ detail error:", err);
@@ -113,7 +116,7 @@ router.put("/:id", verifyToken, async (req, res) => {
 router.delete("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findOneAndDelete({
-      _id:   req.params.id,
+      _id:    req.params.id,
       userId: req.user.userId,
     });
     if (!star) return res.status(404).json({ message: "Star not found" });
@@ -136,9 +139,9 @@ router.patch("/:id/rights", verifyToken, async (req, res) => {
 
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
+    if (!star) return res.status(404).json({ message: "Star not found" });
 
-    const me = req.user.userId;
+    const me       = req.user.userId;
     const isOwner  = String(star.userId) === me;
     const isEditor = star.canEdit?.some((u) => String(u) === me);
 
@@ -165,31 +168,41 @@ router.patch("/:id/rights", verifyToken, async (req, res) => {
   }
 });
 
-/*───────────────────────── 7. Members ───────────────────────*/
+/*───────────────────────── 7. MEMBERS ──────────────────────*/
+
+/** GET /api/stars/:id/members
+ *  → { members: [ { _id, username, role }, … ] }
+ */
 router.get("/:id/members", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id).lean();
     if (!star) return res.status(404).json({ message: "Star not found" });
 
-    // only owner / canView / canEdit may see the member list
-    const me = req.user.userId;
-    const isAllowed =
-      String(star.userId) === me ||
-      star.canView.some((u) => u.toString() === me) ||
-      star.canEdit.some((u) => u.toString() === me);
-    if (!isAllowed) return res.status(403).json({ message: "Forbidden" });
+    const me      = req.user.userId;
+    const isOwner = String(star.userId) === me;
+    const isView  = star.canView .some((u) => String(u) === me);
+    const isEdit  = star.canEdit .some((u) => String(u) === me);
+    if (!isOwner && !isView && !isEdit) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
 
-    // merge view+edit without duplicates
-    const ids = Array.from(new Set([...(star.canView||[]), ...(star.canEdit||[])]));
-    // fetch their usernames
-    const users = await User.find({ _id: { $in: ids } }).select("username").lean();
+    // unique IDs
+    const ids = Array.from(new Set([
+      ...star.canView.map(String),
+      ...star.canEdit.map(String),
+    ]));
 
-    const members = users.map((u) => ({
-      _id: u._id.toString(),
-      username: u.username,
-      role: star.canEdit.some((x) => x.toString() === u._id.toString())
-            ? "Can edit"
-            : "Can view",
+    // lookup usernames
+    const users = await User.find({ _id: { $in: ids } })
+                            .select("username")
+                            .lean();
+
+    const members = users.map(u => ({
+      _id:     u._id,
+      username:u.username,
+      role:    star.canEdit.some(id => String(id) === String(u._id))
+               ? "Can edit"
+               : "Can view",
     }));
 
     res.json({ members });
