@@ -1,217 +1,164 @@
 // routes/v2/stars.js
-import express      from "express";
-import mongoose     from "mongoose";
-import Star         from "../../models/v2/Star.js";
-import User         from "../../models/v2/User.js";
-import verifyToken  from "../../middleware/v1/authMiddleware.js";
+import express     from "express";
+import mongoose    from "mongoose";
+import Star        from "../../models/v2/Star.js";
+import User        from "../../models/v2/User.js";
+import verifyToken from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router();
+const toId = v => new mongoose.Types.ObjectId(v);
 
-/*───────────────────────── helpers ─────────────────────────*/
-const toId = (v) => new mongoose.Types.ObjectId(v);
-
-const visibleToMe = (me) => ({
-  $or: [{ userId: me }, { canView: me }, { canEdit: me }],
-});
-
-const canSee  = (star, me) =>
+// who can see/edit?
+const canSee = (star, me) =>
   String(star.userId) === me ||
-  star.canView?.some((u) => String(u) === me) ||
-  star.canEdit?.some((u) => String(u) === me);
+  star.canView?.some(u => String(u) === me) ||
+  star.canEdit?.some(u => String(u) === me);
 
 const canEdit = (star, me) =>
   String(star.userId) === me ||
-  star.canEdit?.some((u) => String(u) === me);
+  star.canEdit?.some(u => String(u) === me);
 
-/*───────────────────────── 1. LIJSTEN ──────────────────────*/
-
-/** GET  /api/stars
- *  -> Alle sterren die ik mag zien (owner ∪ canView ∪ canEdit)
- */
+// 1. LIST ALL VISIBLE
 router.get("/", verifyToken, async (req, res) => {
   try {
-    const me    = toId(req.user.userId);
-    const stars = await Star.find(visibleToMe(me));
+    const me = toId(req.user.userId);
+    const stars = await Star.find({
+      $or: [{ userId: me }, { canView: me }, { canEdit: me }],
+    });
     res.json(stars);
   } catch (err) {
-    console.error("★ list error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/** GET  /api/stars/dedicate
- *  -> Alleen dedicate-sterren die ik mag zien
- */
+// 2. LIST DEDICATE‐ONLY
 router.get("/dedicate", verifyToken, async (req, res) => {
   try {
-    const me    = toId(req.user.userId);
+    const me = toId(req.user.userId);
     const stars = await Star.find({
       starFor: "dedicate",
-      ...visibleToMe(me),
+      $or: [{ userId: me }, { canView: me }, { canEdit: me }],
     });
     res.json(stars);
   } catch (err) {
-    console.error("★ dedicate error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/*───────────────────────── 2. AANMAKEN ─────────────────────*/
-
-/** POST /api/stars */
+// 3. CREATE
 router.post("/", verifyToken, async (req, res) => {
   try {
-    const star = await Star.create({
-      ...req.body,
-      userId: req.user.userId,
-    });
+    const star = await Star.create({ ...req.body, userId: req.user.userId });
     res.status(201).json(star);
   } catch (err) {
-    console.error("★ create error:", err);
+    console.error(err);
     res.status(400).json({ message: err.message });
   }
 });
 
-/*───────────────────────── 3. DETAILS ──────────────────────*/
-
-/** GET /api/stars/:id */
+// 4. DETAIL
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
-    if (!canSee(star, req.user.userId))
-      return res.status(403).json({ message: "Forbidden" });
-
-    const owner = await User.findById(star.userId)
-                            .select("username firstName lastName");
+    if (!star) return res.status(404).json({ message: "Star not found" });
+    if (!canSee(star, req.user.userId)) return res.status(403).json({ message: "Forbidden" });
+    const owner = await User.findById(star.userId).select("username firstName lastName");
     res.json({ star, owner });
   } catch (err) {
-    console.error("★ detail error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/*───────────────────────── 7. MEMBERS ──────────────────────*/
-
-/** GET /api/stars/:id/members
- *  → { members: [ { _id, username, role }, … ] }
- */
+// ─── NEW: GET MEMBERS ────────────────────────────────
 router.get("/:id/members", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id).lean();
     if (!star) return res.status(404).json({ message: "Star not found" });
+    const me = req.user.userId;
+    if (!canSee(star, me)) return res.status(403).json({ message: "Forbidden" });
 
-    const me      = req.user.userId;
-    const isOwner = String(star.userId) === me;
-    const isView  = star.canView .some((u) => String(u) === me);
-    const isEdit  = star.canEdit .some((u) => String(u) === me);
-    if (!isOwner && !isView && !isEdit) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-
-    // unique IDs
+    // build unique list of userIds
     const ids = Array.from(new Set([
       ...star.canView.map(String),
       ...star.canEdit.map(String),
     ]));
 
-    // lookup usernames
+    // fetch usernames
     const users = await User.find({ _id: { $in: ids } })
                             .select("username")
                             .lean();
 
     const members = users.map(u => ({
-      _id:     u._id,
-      username:u.username,
-      role:    star.canEdit.some(id => String(id) === String(u._id))
-               ? "Can edit"
-               : "Can view",
+      _id:      u._id,
+      username: u.username,
+      role:     star.canEdit.some(id => String(id) === String(u._id))
+                ? "Can edit"
+                : "Can view",
     }));
 
     res.json({ members });
   } catch (err) {
-    console.error("★ members error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/*───────────────────────── 4. UPDATEN ──────────────────────*/
-
-/** PUT /api/stars/:id */
+// 5. UPDATE
 router.put("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
-    if (!canEdit(star, req.user.userId))
-      return res.status(403).json({ message: "Forbidden" });
-
+    if (!star) return res.status(404).json({ message: "Star not found" });
+    if (!canEdit(star, req.user.userId)) return res.status(403).json({ message: "Forbidden" });
     Object.assign(star, req.body, { updatedAt: new Date() });
     await star.save();
     res.json(star);
   } catch (err) {
-    console.error("★ update error:", err);
+    console.error(err);
     res.status(400).json({ message: err.message });
   }
 });
 
-/*───────────────────────── 5. VERWIJDEREN ──────────────────*/
-
-/** DELETE /api/stars/:id  (alleen owner) */
+// 6. DELETE
 router.delete("/:id", verifyToken, async (req, res) => {
   try {
-    const star = await Star.findOneAndDelete({
-      _id:    req.params.id,
-      userId: req.user.userId,
-    });
+    const star = await Star.findOneAndDelete({ _id: req.params.id, userId: req.user.userId });
     if (!star) return res.status(404).json({ message: "Star not found" });
     res.json({ message: "Star deleted" });
   } catch (err) {
-    console.error("★ delete error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-/*───────────────────────── 6. RIGHTS ───────────────────────*/
-
-/** PATCH /api/stars/:id/rights
- *  body = { userId, mode:"view"|"edit", action:"add"|"remove" }
- */
+// 7. RIGHTS PATCH
 router.patch("/:id/rights", verifyToken, async (req, res) => {
   const { userId, mode, action } = req.body;
-  if (!["view","edit"].includes(mode) || !["add","remove"].includes(action))
+  if (!["view","edit"].includes(mode) || !["add","remove"].includes(action)) {
     return res.status(400).json({ message: "Invalid body" });
-
+  }
   try {
     const star = await Star.findById(req.params.id);
     if (!star) return res.status(404).json({ message: "Star not found" });
-
-    const me       = req.user.userId;
+    const me = req.user.userId;
     const isOwner  = String(star.userId) === me;
-    const isEditor = star.canEdit?.some((u) => String(u) === me);
-
-    if (!isOwner && !isEditor)
-      return res.status(403).json({ message: "Forbidden" });
-
-    if (!isOwner && mode === "edit")
-      return res.status(403).json({ message: "Only owner can change edit rights" });
-
+    const isEditor = star.canEdit?.some(u => String(u) === me);
+    if (!isOwner && !isEditor)                  return res.status(403).json({ message: "Forbidden" });
+    if (!isOwner && mode === "edit")            return res.status(403).json({ message: "Only owner can change edit rights" });
     const field = mode === "view" ? "canView" : "canEdit";
-
     if (action === "add") {
-      if (!star[field].some((u) => String(u) === userId))
-        star[field].push(userId);
+      if (!star[field].some(u => String(u) === userId)) star[field].push(userId);
     } else {
-      star[field] = star[field].filter((u) => String(u) !== userId);
+      star[field] = star[field].filter(u => String(u) !== userId);
     }
-
     await star.save();
     res.json({ message: "Rights updated", star });
   } catch (err) {
-    console.error("★ rights error:", err);
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
-
-
 
 export default router;
