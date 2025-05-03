@@ -1,25 +1,29 @@
 // routes/v2/stars.js
-import express      from "express";
-import mongoose     from "mongoose";
-import Star         from "../../models/v2/Star.js";
-import User         from "../../models/v2/User.js";
-import verifyToken  from "../../middleware/v1/authMiddleware.js";
+import express     from "express";
+import mongoose    from "mongoose";
+import Star        from "../../models/v2/Star.js";
+import User        from "../../models/v2/User.js";
+import verifyToken from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router();
 
 /*───────────────────────── helpers ─────────────────────────*/
+
+// Zet een string om naar ObjectId
 const toId = (v) => new mongoose.Types.ObjectId(v);
 
-const visibleToMe = (me) => ({
-  $or: [{ userId: me }, { canView: me }, { canEdit: me }],
-});
+// Check of gebruiker 'me' de ster mag zien (owner ∪ canView ∪ canEdit)
+function canSee(star, me) {
+  const ownerMatch = String(star.userId) === me;
+  const viewMatch  = star.canView?.some((u) => String(u) === me);
+  const editMatch  = star.canEdit?.some((u) => String(u) === me);
+  return ownerMatch || viewMatch || editMatch;
+}
 
-const canSee   = (star, me) => visibleToMe(me).$or.some((c) => c[Object.keys(c)[0]].toString() === String(star.userId) ||
-                                                              star.canView?.some((u) => String(u) === me) ||
-                                                              star.canEdit?.some((u) => String(u) === me));
-
-const canEdit  = (star, me) => String(star.userId) === me ||
-                               star.canEdit?.some((u) => String(u) === me);
+// Check of gebruiker 'me' de ster mag bewerken (owner ∪ canEdit)
+function canEdit(star, me) {
+  return String(star.userId) === me || star.canEdit?.some((u) => String(u) === me);
+}
 
 /*───────────────────────── 1. LIJSTEN ──────────────────────*/
 
@@ -29,8 +33,10 @@ const canEdit  = (star, me) => String(star.userId) === me ||
 router.get("/", verifyToken, async (req, res) => {
   try {
     const me    = toId(req.user.userId);
-    const stars = await Star.find(visibleToMe(me));
-    res.json(stars);                     // ← terug naar de “oude” vorm
+    const stars = await Star.find({
+      $or: [{ userId: me }, { canView: me }, { canEdit: me }],
+    });
+    res.json(stars);
   } catch (err) {
     console.error("★ list error:", err);
     res.status(500).json({ message: "Server error" });
@@ -42,12 +48,12 @@ router.get("/", verifyToken, async (req, res) => {
  */
 router.get("/dedicate", verifyToken, async (req, res) => {
   try {
-    const me    = toId(req.user.userId);
+    const me = toId(req.user.userId);
     const stars = await Star.find({
       starFor: "dedicate",
-      ...visibleToMe(me),
+      $or: [{ userId: me }, { canView: me }, { canEdit: me }],
     });
-    res.json(stars);                     // ← ook hier: plain array
+    res.json(stars);
   } catch (err) {
     console.error("★ dedicate error:", err);
     res.status(500).json({ message: "Server error" });
@@ -76,11 +82,12 @@ router.post("/", verifyToken, async (req, res) => {
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
+    if (!star) return res.status(404).json({ message: "Star not found" });
     if (!canSee(star, req.user.userId))
       return res.status(403).json({ message: "Forbidden" });
 
-    const owner = await User.findById(star.userId).select("username firstName lastName");
+    const owner = await User.findById(star.userId)
+      .select("username firstName lastName");
     res.json({ star, owner });
   } catch (err) {
     console.error("★ detail error:", err);
@@ -94,7 +101,7 @@ router.get("/:id", verifyToken, async (req, res) => {
 router.put("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
+    if (!star) return res.status(404).json({ message: "Star not found" });
     if (!canEdit(star, req.user.userId))
       return res.status(403).json({ message: "Forbidden" });
 
@@ -109,11 +116,11 @@ router.put("/:id", verifyToken, async (req, res) => {
 
 /*───────────────────────── 5. VERWIJDEREN ──────────────────*/
 
-/** DELETE /api/stars/:id  (alleen owner) */
+/** DELETE /api/stars/:id (alleen owner) */
 router.delete("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findOneAndDelete({
-      _id:   req.params.id,
+      _id:    req.params.id,
       userId: req.user.userId,
     });
     if (!star) return res.status(404).json({ message: "Star not found" });
@@ -131,28 +138,29 @@ router.delete("/:id", verifyToken, async (req, res) => {
  */
 router.patch("/:id/rights", verifyToken, async (req, res) => {
   const { userId, mode, action } = req.body;
-  if (!["view","edit"].includes(mode) || !["add","remove"].includes(action))
+  if (!["view", "edit"].includes(mode) || !["add", "remove"].includes(action)) {
     return res.status(400).json({ message: "Invalid body" });
+  }
 
   try {
     const star = await Star.findById(req.params.id);
-    if (!star)   return res.status(404).json({ message: "Star not found" });
+    if (!star) return res.status(404).json({ message: "Star not found" });
 
-    const me = req.user.userId;
+    const me       = req.user.userId;
     const isOwner  = String(star.userId) === me;
     const isEditor = star.canEdit?.some((u) => String(u) === me);
 
     if (!isOwner && !isEditor)
       return res.status(403).json({ message: "Forbidden" });
-
     if (!isOwner && mode === "edit")
       return res.status(403).json({ message: "Only owner can change edit rights" });
 
     const field = mode === "view" ? "canView" : "canEdit";
 
     if (action === "add") {
-      if (!star[field].some((u) => String(u) === userId))
+      if (!star[field].some((u) => String(u) === userId)) {
         star[field].push(userId);
+      }
     } else {
       star[field] = star[field].filter((u) => String(u) !== userId);
     }
