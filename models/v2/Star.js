@@ -11,7 +11,6 @@ const starSchema = new mongoose.Schema({
 
   /* uiterlijk + label */
   color:       String,        // basis‑kleur  (hex “#ffffff”)
-  emissive:    String,        // gloed‑kleur  (hex) – voeg toe als je die bewaart
   publicName:  String,
   word:        String,
   activationDate: Date,
