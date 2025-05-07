@@ -6,8 +6,7 @@
 
   "scripts": {
     "start":   "node server.js",
-    "dev":     "nodemon server.js",
-    "migrate:stars": "node scripts/migrate-add-star-position.js"
+    "dev":     "nodemon server.js"
   },
 
   "keywords": [],

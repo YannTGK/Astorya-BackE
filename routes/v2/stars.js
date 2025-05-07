@@ -1,17 +1,16 @@
 // routes/v2/stars.js
-import express      from "express";
-import mongoose     from "mongoose";
-import Star         from "../../models/v2/Star.js";
-import User         from "../../models/v2/User.js";
-import verifyToken  from "../../middleware/v1/authMiddleware.js";
+import express       from "express";
+import mongoose      from "mongoose";
+import Star          from "../../models/v2/Star.js";
+import User          from "../../models/v2/User.js";
+import verifyToken   from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router();
 const toId = v => new mongoose.Types.ObjectId(v);
 
 /* ───────────────────────── helpers ───────────────────────── */
 
-/** wie ziet / bewerkt? */
-const canSee = (star, me) =>
+const canSee  = (star, me) =>
   String(star.userId) === me ||
   star.canView?.some(u => String(u) === me) ||
   star.canEdit?.some(u => String(u) === me);
@@ -20,31 +19,41 @@ const canEdit = (star, me) =>
   String(star.userId) === me ||
   star.canEdit?.some(u => String(u) === me);
 
-/* spawn‑positie ========================================================== */
-/*  – elke ±350 sterren schuiven we één “shell” verder naar buiten         */
+/* ronde op 1 cijfer na de komma */
+const round1 = v => Math.round(v * 10) / 10;
 
-async function getSpawnPosition() {
-  const N = await Star.estimatedDocumentCount();     // snel & goedkoop
-  const SHELL_THICKNESS = 400;                       // breedte van de schil
-  const INNER_RADIUS    = 200;                       // begint vanaf R=200
-  const shellIndex      = Math.floor(N / 350);       // elke 350 sterren next shell
+/* genereer willekeurige positie in een “shell” */
+async function randomCoords() {
+  const TOTAL = await Star.estimatedDocumentCount();
+  const SHELL = 400;          // dikte
+  const R0    = 200;          // binnenste straal
+  const idx   = Math.floor(TOTAL / 350);
+  const minR  = R0 + idx * SHELL;
+  const maxR  = minR + SHELL;
+  const r     = Math.random() * (maxR - minR) + minR;
 
-  const minR = INNER_RADIUS + shellIndex * SHELL_THICKNESS;
-  const maxR = minR + SHELL_THICKNESS;
-  const r    = Math.random() * (maxR - minR) + minR;
+  const θ = Math.random() * Math.PI * 2;       // 0‑2π
+  const φ = Math.acos(2 * Math.random() - 1);  // 0‑π
 
-  /* uniform random punt op boloppervlak */
-  const theta = Math.random() * Math.PI * 2;                 // 0‑2π
-  const phi   = Math.acos(2 * Math.random() - 1);            // 0‑π
-
-  const x = r * Math.sin(phi) * Math.cos(theta);
-  const y = r * Math.sin(phi) * Math.sin(theta);
-  const z = r * Math.cos(phi);
-
-  return { x, y, z };
+  return {
+    x: round1(r * Math.sin(φ) * Math.cos(θ)),
+    y: round1(r * Math.sin(φ) * Math.sin(θ)),
+    z: round1(r * Math.cos(φ)),
+  };
 }
 
-/* ───────────────────── 1. LIST ALL VISIBLE ─────────────────── */
+/* geef gegarandeerd nog‑niet‑geclaimde positie (max 10 pogingen) */
+async function getSpawnPosition() {
+  for (let i = 0; i < 10; i++) {
+    const pos = await randomCoords();
+    const exists = await Star.exists({ x: pos.x, y: pos.y, z: pos.z });
+    if (!exists) return pos;
+  }
+  // fallback: laat duplicate toe – kans is erg klein
+  return randomCoords();
+}
+
+/* ───────────────────── 1. LIST ALL VISIBLE ───────────────── */
 router.get("/", verifyToken, async (req, res) => {
   try {
     const me = toId(req.user.userId);
@@ -58,7 +67,7 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 2. LIST DEDICATE ONLY ───────────────── */
+/* ───────────────────── 2. LIST DEDICATE ONLY ─────────────── */
 router.get("/dedicate", verifyToken, async (req, res) => {
   try {
     const me = toId(req.user.userId);
@@ -73,22 +82,21 @@ router.get("/dedicate", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 3. CREATE ───────────────────────────── */
+/* ───────────────────── 3. CREATE ─────────────────────────── */
 router.post("/", verifyToken, async (req, res) => {
   try {
-    /* positie aanvullen als die niet is meegegeven */
-    const { x, y, z } = req.body;
-    let coords = { x, y, z };
-    if (x === undefined || y === undefined || z === undefined) {
-      coords = await getSpawnPosition();
+    let { x, y, z } = req.body;
+    if (x == null || y == null || z == null) {
+      ({ x, y, z } = await getSpawnPosition());
+    } else {
+      x = round1(x); y = round1(y); z = round1(z);
     }
 
     const star = await Star.create({
       ...req.body,
-      ...coords,
+      x, y, z,
       userId: req.user.userId,
     });
-
     res.status(201).json(star);
   } catch (err) {
     console.error("★ create error:", err);
@@ -96,15 +104,14 @@ router.post("/", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 4. DETAIL ───────────────────────────── */
+/* ───────────────────── 4. DETAIL ─────────────────────────── */
 router.get("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
     if (!star)                           return res.status(404).json({ message: "Star not found" });
     if (!canSee(star, req.user.userId)) return res.status(403).json({ message: "Forbidden" });
 
-    const owner = await User.findById(star.userId)
-                            .select("username firstName lastName");
+    const owner = await User.findById(star.userId).select("username firstName lastName");
     res.json({ star, owner });
   } catch (err) {
     console.error("★ detail error:", err);
@@ -112,30 +119,21 @@ router.get("/:id", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 4b. MEMBERS ─────────────────────────── */
+/* ───────────────────── 4b. MEMBERS ───────────────────────── */
 router.get("/:id/members", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id).lean();
     if (!star)                           return res.status(404).json({ message: "Star not found" });
     if (!canSee(star, req.user.userId)) return res.status(403).json({ message: "Forbidden" });
 
-    const ids = Array.from(new Set([
-      ...star.canView.map(String),
-      ...star.canEdit.map(String),
-    ]));
-
-    const users = await User.find({ _id: { $in: ids } })
-                            .select("username")
-                            .lean();
+    const ids = Array.from(new Set([...star.canView, ...star.canEdit].map(String)));
+    const users = await User.find({ _id: { $in: ids } }).select("username").lean();
 
     const members = users.map(u => ({
-      _id:      u._id,
+      _id: u._id,
       username: u.username,
-      role:     star.canEdit.some(id => String(id) === String(u._id))
-                ? "Can edit"
-                : "Can view",
+      role: star.canEdit.some(id => String(id) === String(u._id)) ? "Can edit" : "Can view",
     }));
-
     res.json({ members });
   } catch (err) {
     console.error("★ members error:", err);
@@ -143,16 +141,15 @@ router.get("/:id/members", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 5. UPDATE ───────────────────────────── */
+/* ───────────────────── 5. UPDATE ─────────────────────────── */
 router.put("/:id", verifyToken, async (req, res) => {
   try {
     const star = await Star.findById(req.params.id);
     if (!star)                           return res.status(404).json({ message: "Star not found" });
     if (!canEdit(star, req.user.userId)) return res.status(403).json({ message: "Forbidden" });
 
-    /* voorkom dat men x/y/z zomaar kan wijzigen */
-    const { x, y, z, ...rest } = req.body;
-    Object.assign(star, rest, { updatedAt: new Date() });
+    const { x, y, z, ...allowed } = req.body;      // position niet mutabel
+    Object.assign(star, allowed, { updatedAt: new Date() });
 
     await star.save();
     res.json(star);
@@ -162,13 +159,10 @@ router.put("/:id", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 6. DELETE ───────────────────────────── */
+/* ───────────────────── 6. DELETE ─────────────────────────── */
 router.delete("/:id", verifyToken, async (req, res) => {
   try {
-    const star = await Star.findOneAndDelete({
-      _id:    req.params.id,
-      userId: req.user.userId,   // alleen owner
-    });
+    const star = await Star.findOneAndDelete({ _id: req.params.id, userId: req.user.userId });
     if (!star) return res.status(404).json({ message: "Star not found" });
     res.json({ message: "Star deleted" });
   } catch (err) {
@@ -177,25 +171,23 @@ router.delete("/:id", verifyToken, async (req, res) => {
   }
 });
 
-/* ───────────────────── 7. RIGHTS PATCH ─────────────────────── */
+/* ───────────────────── 7. RIGHTS PATCH ───────────────────── */
 router.patch("/:id/rights", verifyToken, async (req, res) => {
   const { userId, mode, action } = req.body;
   if (!["view", "edit"].includes(mode) || !["add", "remove"].includes(action)) {
     return res.status(400).json({ message: "Invalid body" });
   }
-
   try {
     const star = await Star.findById(req.params.id);
     if (!star) return res.status(404).json({ message: "Star not found" });
 
     const me       = req.user.userId;
     const isOwner  = String(star.userId) === me;
-    const isEditor = star.canEdit?.some(u => String(u) === me);
-    if (!isOwner && !isEditor) return res.status(403).json({ message: "Forbidden" });
-    if (!isOwner && mode === "edit") return res.status(403).json({ message: "Only owner can change edit rights" });
+    const isEditor = star.canEdit.some(u => String(u) === me);
+    if (!isOwner && !isEditor)                  return res.status(403).json({ message: "Forbidden" });
+    if (!isOwner && mode === "edit")            return res.status(403).json({ message: "Only owner can change edit rights" });
 
     const field = mode === "view" ? "canView" : "canEdit";
-
     if (action === "add") {
       if (!star[field].some(u => String(u) === userId)) star[field].push(userId);
     } else {
