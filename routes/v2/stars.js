@@ -22,6 +22,15 @@ const canEdit = (star, me) =>
 /* ronde op 1 cijfer na de komma */
 const round1 = v => Math.round(v * 10) / 10;
 
+/* helper: “Elina De Vos” → “E.D.V.” */
+const initials = name =>
+  (name ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase())
+    .join(".") + ".";
+
 /* genereer willekeurige positie in een “shell” */
 async function randomCoords() {
   const TOTAL = await Star.estimatedDocumentCount();
@@ -84,14 +93,34 @@ router.get("/dedicate", verifyToken, async (req, res) => {
 
 router.get("/public", async (_, res) => {
   try {
-    const stars = await Star.find(
-      { isPrivate:false, x:{$type:"number"}, y:{$type:"number"}, z:{$type:"number"} },
-      { canView:0, canEdit:0, createdAt:0, updatedAt:0, __v:0 }
+    const raw = await Star.find(
+      {
+        /* 1️⃣ niet‑private  OR  2️⃣ dedicate‑ster (maakt niet uit of private) */
+        $or: [
+          { isPrivate: false },
+          { starFor: "dedicate" }
+        ],
+        /* alleen sterren die al xyz‑coords hebben */
+        x: { $type: "number" },
+        y: { $type: "number" },
+        z: { $type: "number" },
+        color: { $exists: true }
+      },
+      /* we verbergen irrelevante velden */
+      { canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0 }
     ).lean();
+
+    /* dedicate‑sterren → initialen */
+    const stars = raw.map(s => ({
+      ...s,
+      publicName:
+        s.starFor === "dedicate" ? initials(s.publicName) : s.publicName
+    }));
+
     res.json({ stars });
   } catch (err) {
     console.error("★ public error:", err);
-    res.status(500).json({ message:"Server error" });
+    res.status(500).json({ message: "Server error" });
   }
 });
 
