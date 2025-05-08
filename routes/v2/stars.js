@@ -124,6 +124,36 @@ router.get("/public", async (_, res) => {
   }
 });
 
+/* ───────────────────── /private ──────────────────────────
+   Alle sterren die voor mij privé zijn (dedicate óf isPrivate) */
+   // 2b. LIST *PRIVATE*  (dedicate ᴜɴɪᴏɴ explicit‑private)
+  router.get("/private", verifyToken, async (req, res) => {
+    try {
+      const me = toId(req.user.userId);
+
+      const access = [{ userId: me }, { canView: me }, { canEdit: me }];
+
+      const stars = await Star.find(
+        {
+          $or: [
+            /* dedicate‑stars I can see */
+            { starFor: "dedicate", $or: access },
+
+            /* explicitly private stars I can see */
+            { isPrivate: true,     $or: access }
+          ]
+        },
+        /* projection – strip meta we don’t need */
+        { canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0 }
+      ).lean();
+
+      res.json({ stars });
+    } catch (err) {
+      console.error("★ private error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+
 /* ───────────────────── 3. CREATE ─────────────────────────── */
 router.post("/", verifyToken, async (req, res) => {
   try {
