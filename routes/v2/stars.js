@@ -82,6 +82,19 @@ router.get("/dedicate", verifyToken, async (req, res) => {
   }
 });
 
+router.get("/public", async (_, res) => {
+  try {
+    const stars = await Star.find(
+      { isPrivate:false, x:{$type:"number"}, y:{$type:"number"}, z:{$type:"number"} },
+      { canView:0, canEdit:0, createdAt:0, updatedAt:0, __v:0 }
+    ).lean();
+    res.json({ stars });
+  } catch (err) {
+    console.error("★ public error:", err);
+    res.status(500).json({ message:"Server error" });
+  }
+});
+
 /* ───────────────────── 3. CREATE ─────────────────────────── */
 router.post("/", verifyToken, async (req, res) => {
   try {
