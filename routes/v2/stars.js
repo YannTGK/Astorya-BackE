@@ -95,43 +95,49 @@ router.get("/dedicate", verifyToken, async (req, res) => {
    - dedicate‑sterren: altijd tonen
    - gewone publieke sterren: alleen als owner isAlive == false
 ------------------------------------------------------------------- */
-router.get("/public", async (_, res) => {
+router.get("/public", verifyToken, async (req, res) => {
   try {
-    /* basis: niet‑private óf dedicate, mét xyz en kleur */
-    const baseFilter = {
-      $or: [
-        { isPrivate: false },      // gewone publieke sterren
-        { starFor: "dedicate" }    // dedicate (maakt niet uit of private)
-      ],
-      x:     { $type: "number" },
-      y:     { $type: "number" },
-      z:     { $type: "number" },
-      color: { $exists: true },
+    const me = req.user ? String(req.user.userId) : null;   // userid uit JWT (kan null zijn)
+
+    const base = {
+      $or: [{ isPrivate: false }, { starFor: "dedicate" }],
+      x:{ $type:"number" }, y:{ $type:"number" }, z:{ $type:"number" },
+      color:{ $exists:true },
     };
 
-    /* haal sterren + owner.isAlive binnen */
-    const raw = await Star.find(baseFilter)
-      .populate({ path: "userId", select: "isAlive" })
+    const raw = await Star.find(base)
+      .populate({ path: "userId", select: "isAlive" }) // enkel isAlive nodig
       .lean();
 
-    /* filter:
-       - altijd   starFor === "dedicate"
-       - anders   owner.isAlive === false */
+    /* dedicate always visible; overige alleen als owner dood */
     const visible = raw.filter(
       s => s.starFor === "dedicate" || s.userId?.isAlive === false
     );
 
-    /* dedicate‑namen → initialen, userId strippen */
-    const stars = visible.map(({ userId, ...s }) => ({
-      ...s,
-      publicName:
-        s.starFor === "dedicate" ? initials(s.publicName) : s.publicName,
-    }));
+    const stars = visible.map(s => {
+      const related =
+        !!me && (
+          String(s.userId?._id) === me ||                // owner
+          s.canView?.some(id => String(id) === me) ||   // expliciet canView
+          s.canEdit?.some(id => String(id) === me)      // expliciet canEdit
+        );
 
-    return res.json({ stars });
+      return {
+        _id:        s._id,
+        x:          s.x,
+        y:          s.y,
+        z:          s.z,
+        color:      s.color,
+        starFor:    s.starFor,
+        publicName: s.starFor === "dedicate" ? initials(s.publicName) : s.publicName,
+        related,                                        // ← boolean
+      };
+    });
+
+    res.json({ stars });
   } catch (err) {
     console.error("★ public error:", err);
-    return res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error" });
   }
 });
 
