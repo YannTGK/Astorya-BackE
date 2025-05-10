@@ -91,68 +91,92 @@ router.get("/dedicate", verifyToken, async (req, res) => {
   }
 });
 
+/* ───────────────────────── /stars/public ─────────────────────────
+   - dedicate‑sterren: altijd tonen
+   - gewone publieke sterren: alleen als owner isAlive == false
+------------------------------------------------------------------- */
 router.get("/public", async (_, res) => {
   try {
-    const raw = await Star.find(
-      {
-        /* 1️⃣ niet‑private  OR  2️⃣ dedicate‑ster (maakt niet uit of private) */
-        $or: [
-          { isPrivate: false },
-          { starFor: "dedicate" }
-        ],
-        /* alleen sterren die al xyz‑coords hebben */
-        x: { $type: "number" },
-        y: { $type: "number" },
-        z: { $type: "number" },
-        color: { $exists: true }
-      },
-      /* we verbergen irrelevante velden */
-      { canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0 }
-    ).lean();
+    /* basis: niet‑private óf dedicate, mét xyz en kleur */
+    const baseFilter = {
+      $or: [
+        { isPrivate: false },      // gewone publieke sterren
+        { starFor: "dedicate" }    // dedicate (maakt niet uit of private)
+      ],
+      x:     { $type: "number" },
+      y:     { $type: "number" },
+      z:     { $type: "number" },
+      color: { $exists: true },
+    };
 
-    /* dedicate‑sterren → initialen */
-    const stars = raw.map(s => ({
+    /* haal sterren + owner.isAlive binnen */
+    const raw = await Star.find(baseFilter)
+      .populate({ path: "userId", select: "isAlive" })
+      .lean();
+
+    /* filter:
+       - altijd   starFor === "dedicate"
+       - anders   owner.isAlive === false */
+    const visible = raw.filter(
+      s => s.starFor === "dedicate" || s.userId?.isAlive === false
+    );
+
+    /* dedicate‑namen → initialen, userId strippen */
+    const stars = visible.map(({ userId, ...s }) => ({
       ...s,
       publicName:
-        s.starFor === "dedicate" ? initials(s.publicName) : s.publicName
+        s.starFor === "dedicate" ? initials(s.publicName) : s.publicName,
     }));
 
-    res.json({ stars });
+    return res.json({ stars });
   } catch (err) {
     console.error("★ public error:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
-/* ───────────────────── /private ──────────────────────────
-   Alle sterren die voor mij privé zijn (dedicate óf isPrivate) */
-   // 2b. LIST *PRIVATE*  (dedicate ᴜɴɪᴏɴ explicit‑private)
-  router.get("/private", verifyToken, async (req, res) => {
-    try {
-      const me = toId(req.user.userId);
+/* ───────────────────────── /stars/private ─────────────────────────
+   • dedicate‑sterren die ik kan zien  → altijd
+   • gewone private sterren die ik kan zien → alleen als owner.isAlive == false
+   • userId wordt wél meegegeven, maar alleen als id‑string
+-------------------------------------------------------------------- */
+router.get("/private", verifyToken, async (req, res) => {
+  try {
+    const me = toId(req.user.userId);
+    const access = [{ userId: me }, { canView: me }, { canEdit: me }];
 
-      const access = [{ userId: me }, { canView: me }, { canEdit: me }];
+    /* basisselectie */
+    const baseFilter = {
+      $or: [
+        { starFor: "dedicate", $or: access },
+        { isPrivate: true,     $or: access },
+      ],
+    };
 
-      const stars = await Star.find(
-        {
-          $or: [
-            /* dedicate‑stars I can see */
-            { starFor: "dedicate", $or: access },
+    /* query + owner.isAlive ophalen */
+    const raw = await Star.find(baseFilter, {
+      canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0,
+    })
+      .populate({ path: "userId", select: "isAlive" }) // haal alleen isAlive op
+      .lean();
 
-            /* explicitly private stars I can see */
-            { isPrivate: true,     $or: access }
-          ]
-        },
-        /* projection – strip meta we don’t need */
-        { canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0 }
-      ).lean();
+    /* filter op overleden owners, behalve dedicate (die altijd mee mag) */
+    const visible = raw.filter(
+      s => s.starFor === "dedicate" || s.userId?.isAlive === false
+    );
 
-      res.json({ stars });
-    } catch (err) {
-      console.error("★ private error:", err);
-      res.status(500).json({ message: "Server error" });
-    }
-  });
+    /* map: userId → id‑string, isAlive strippen */
+    const stars = visible.map(s => ({
+      ...s,
+      userId: s.userId?._id ?? s.userId,   // id als string/ObjectId
+    }));
+
+    return res.json({ stars });
+  } catch (err) {
+    console.error("★ private error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
 
 /* ───────────────────── 3. CREATE ─────────────────────────── */
 router.post("/", verifyToken, async (req, res) => {
