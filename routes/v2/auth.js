@@ -6,68 +6,47 @@ import verifyToken from '../../middleware/v1/authMiddleware.js';
 const router = express.Router();
 
 // REGISTER
+// routes/v2/auth.js
 router.post('/register', async (req, res) => {
   const {
-    firstName,
-    lastName,
-    username,      // <-- now we accept username
-    email,
-    phoneNumber,
-    dob,
-    password
-  } = req.body;
-
-  console.log("📥 Received registration data:", {
     firstName,
     lastName,
     username,
     email,
     phoneNumber,
     dob,
-    password: "[HIDDEN]"
-  });
+    password,
+    country  // <-- toegevoegd
+  } = req.body;
 
   try {
-    // Check if this email is already in use
     const existingEmail = await User.findOne({ email });
-    if (existingEmail) {
-      console.log("❌ Email already exists");
+    if (existingEmail)
       return res.status(400).json({ message: 'Email already exists' });
-    }
 
-    // Check if this username is already in use
     const existingUsername = await User.findOne({ username });
-    if (existingUsername) {
-      console.log("❌ Username already exists");
+    if (existingUsername)
       return res.status(400).json({ message: 'Username already exists' });
-    }
 
-    // Create new user
     const newUser = new User({
       firstName,
       lastName,
-      username,     // <-- store username
+      username,
       email,
       phoneNumber,
       dob,
-      password
+      password,
+      country  // <-- toegevoegd
     });
 
     await newUser.save();
-    console.log("✅ New user saved:", newUser._id);
 
-    // Generate token (optionally including username)
     const token = jwt.sign(
-      {
-        userId: newUser._id,
-        email: newUser.email,
-        username: newUser.username
-      },
+      { userId: newUser._id, email: newUser.email, username: newUser.username },
       process.env.JWT_SECRET_KEY,
       { expiresIn: '7d' }
     );
 
-    console.log("🔐 Token generated");
     return res.status(201).json({ token });
 
   } catch (error) {

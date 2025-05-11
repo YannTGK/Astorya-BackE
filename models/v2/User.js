@@ -25,6 +25,12 @@ const userSchema = new mongoose.Schema(
 
     phoneNumber: String,
     dob:         Date,
+    dod: { type: Date, default: null }, // ← Nieuw veld toevoegen
+
+    country: {
+      type: String,
+      default: "Belgium"
+    },
 
     password: {
       type:     String,

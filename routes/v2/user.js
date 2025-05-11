@@ -151,12 +151,31 @@ router.get("/:id", verifyToken, async (req, res) => {
 
 /** PUT – update user */
 router.put("/:id", verifyToken, async (req, res) => {
+  const allowedUpdates = [
+    "firstName",
+    "lastName",
+    "phoneNumber",
+    "dob",
+    "dod",
+    "country",
+    "isAlive",
+    "plan"
+  ];
+
+  const updates = {};
+  allowedUpdates.forEach(field => {
+    if (field in req.body) updates[field] = req.body[field];
+  });
+
   try {
-    const updated = await User.findByIdAndUpdate(req.params.id, req.body, { new: true })
+    const updated = await User.findByIdAndUpdate(req.params.id, updates, { new: true })
                               .select("-password");
+
     if (!updated) return res.status(404).json({ message: "User not found" });
+
     return res.json(updated);
   } catch (err) {
+    console.error("❌ User update error:", err);
     return res.status(400).json({ message: err.message });
   }
 });
