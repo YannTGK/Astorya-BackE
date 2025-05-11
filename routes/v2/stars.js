@@ -97,29 +97,34 @@ router.get("/dedicate", verifyToken, async (req, res) => {
 ------------------------------------------------------------------- */
 router.get("/public", verifyToken, async (req, res) => {
   try {
-    const me = req.user ? String(req.user.userId) : null;   // userid uit JWT (kan null zijn)
+    const me = req.user ? String(req.user.userId) : null;
 
     const base = {
       $or: [{ isPrivate: false }, { starFor: "dedicate" }],
-      x:{ $type:"number" }, y:{ $type:"number" }, z:{ $type:"number" },
-      color:{ $exists:true },
+      x: { $type: "number" },
+      y: { $type: "number" },
+      z: { $type: "number" },
+      color: { $exists: true },
     };
 
     const raw = await Star.find(base)
-      .populate({ path: "userId", select: "isAlive" }) // enkel isAlive nodig
+      .populate({
+        path: "userId",
+        select: "isAlive dob dod country", // ← extra velden hier
+      })
       .lean();
 
-    /* dedicate always visible; overige alleen als owner dood */
     const visible = raw.filter(
-      s => s.starFor === "dedicate" || s.userId?.isAlive === false
+      (s) => s.starFor === "dedicate" || s.userId?.isAlive === false
     );
 
-    const stars = visible.map(s => {
+    const stars = visible.map((s) => {
       const related =
-        !!me && (
-          String(s.userId?._id) === me ||                // owner
-          s.canView?.some(id => String(id) === me) ||   // expliciet canView
-          s.canEdit?.some(id => String(id) === me)      // expliciet canEdit
+        !!me &&
+        (
+          String(s.userId?._id) === me ||
+          s.canView?.some((id) => String(id) === me) ||
+          s.canEdit?.some((id) => String(id) === me)
         );
 
       return {
@@ -130,7 +135,12 @@ router.get("/public", verifyToken, async (req, res) => {
         color:      s.color,
         starFor:    s.starFor,
         publicName: s.starFor === "dedicate" ? initials(s.publicName) : s.publicName,
-        related,                                        // ← boolean
+        related,
+        user: {                                      // ← nieuwe nested user-data
+          dob:     s.userId?.dob ?? null,
+          dod:     s.userId?.dod ?? null,
+          country: s.userId?.country ?? null,
+        },
       };
     });
 
