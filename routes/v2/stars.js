@@ -160,9 +160,10 @@ router.get("/public", verifyToken, async (req, res) => {
 router.get("/private", verifyToken, async (req, res) => {
   try {
     const me = toId(req.user.userId);
+
+    // Alleen sterren waar je toegang toe hebt
     const access = [{ userId: me }, { canView: me }, { canEdit: me }];
 
-    /* basisselectie */
     const baseFilter = {
       $or: [
         { starFor: "dedicate", $or: access },
@@ -170,22 +171,45 @@ router.get("/private", verifyToken, async (req, res) => {
       ],
     };
 
-    /* query + owner.isAlive ophalen */
-    const raw = await Star.find(baseFilter, {
-      canView: 0, canEdit: 0, createdAt: 0, updatedAt: 0, __v: 0,
-    })
-      .populate({ path: "userId", select: "isAlive" }) // haal alleen isAlive op
+    // Projection: we sluiten alleen overbodige velden uit
+    const raw = await Star.find(
+      baseFilter,
+      {
+        canView:   0,
+        canEdit:   0,
+        updatedAt: 0,
+        __v:       0,
+      }
+    )
+      // Nu ook dob, dod en country ophalen van de eigenaar
+      .populate({ path: "userId", select: "isAlive dob dod country" })
       .lean();
 
-    /* filter op overleden owners, behalve dedicate (die altijd mee mag) */
+    // Alleen dedicated sterren of sterren waarvan de eigenaar overleden is
     const visible = raw.filter(
-      s => s.starFor === "dedicate" || s.userId?.isAlive === false
+      (s) =>
+        s.starFor === "dedicate" ||
+        (s.userId && !s.userId.isAlive)
     );
 
-    /* map: userId → id‑string, isAlive strippen */
-    const stars = visible.map(s => ({
-      ...s,
-      userId: s.userId?._id ?? s.userId,   // id als string/ObjectId
+    // Mappen naar de shape die de client verwacht
+    const stars = visible.map((s) => ({
+      _id:        s._id,
+      x:          s.x,
+      y:          s.y,
+      z:          s.z,
+      color:      s.color,
+      publicName: s.publicName,
+      word:       s.word,
+      starFor:    s.starFor,
+      createdAt:  s.createdAt,
+      // Geneste user-data voor filters in de client
+      user: {
+        dob:     s.userId?.dob ?? null,
+        dod:     s.userId?.dod ?? null,
+        country: s.userId?.country ?? null,
+      },
+      //userId:     typeof s.userId === "object" ? s.userId._id.toString() : s.userId,
     }));
 
     return res.json({ stars });
