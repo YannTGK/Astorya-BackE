@@ -136,6 +136,7 @@ router.get("/public", verifyToken, async (req, res) => {
         starFor:    s.starFor,
         publicName: s.starFor === "dedicate" ? initials(s.publicName) : s.publicName,
         related,
+        createdAt:  s.createdAt, 
         user: {                                      // ← nieuwe nested user-data
           dob:     s.userId?.dob ?? null,
           dod:     s.userId?.dod ?? null,
