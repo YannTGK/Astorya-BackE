@@ -5,8 +5,8 @@ const photoAlbumSchema = new mongoose.Schema({
   starId: { type: mongoose.Schema.Types.ObjectId, ref: 'Star' },
   name: String,
 
-  // Delen op album-niveau
-  sharedWith: [{ type: String }], // E-mails of user-ids
+  canView: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  canEdit: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
