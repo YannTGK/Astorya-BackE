@@ -75,6 +75,7 @@ router.post(
 /* ───────── GET  /           lijst foto’s ───────── */
 
 router.get('/', verifyToken, async (req, res) => {
+  console.log('[photos] params:', req.params);
   const { starId, albumId } = req.params;
   try {
     const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
