@@ -66,9 +66,10 @@ router.put('/detail/:id', verifyToken, async (req, res) => {
     const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
     if (!star) return res.status(403).json({ message: 'Forbidden' });
 
-    const { name, sharedWith } = req.body;
-    if (name !== undefined) album.name = name;
-    if (sharedWith) album.sharedWith = sharedWith;
+    const { name, canView, canEdit } = req.body;     //  ←  hier!
+    if (name     !== undefined) album.name     = name;
+    if (canView)                 album.canView = canView;
+    if (canEdit)                 album.canEdit = canEdit;
     album.updatedAt = new Date();
 
     await album.save();

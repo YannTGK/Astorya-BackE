@@ -109,7 +109,7 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
 
   res.json({
     _id: photo._id,
-    url: await presign(photo.key, 3600),
+    url: await presign(photo.key, 36000),
     addedAt: photo.addedAt,
   });
 });
