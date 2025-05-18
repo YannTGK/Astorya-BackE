@@ -92,12 +92,13 @@ router.get('/', verifyToken, async (req, res) => {
     if (!star || !album) return res.status(404).json({ message: 'Star/Album not found or forbidden' });
 
     const videos = await Video.find({ videoAlbumId: albumId });
-
-    // presigned URLs
-    const out = await Promise.all(videos.map(async v => ({
-      _id: v._id,
-      url: await presign(v.key, 3600),
-    })));
+    // Generate presigned URLs for playback (1h expiry)
+    const out = await Promise.all(
+      videos.map(async v => ({
+        _id : v._id,
+        url : await presign(v.key, 3600),   // <-- presign function for Wasabi
+      }))
+    );
     res.json(out);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
