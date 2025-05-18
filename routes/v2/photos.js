@@ -26,6 +26,15 @@ async function compressImage(inPath, outPath) {
     .toFile(outPath);
 }
 
+async function duplicateInWasabi(srcKey, dstKey) {
+  await wasabi.copyObject({
+    Bucket: process.env.WASABI_BUCKET_NAME,
+    CopySource: `/${process.env.WASABI_BUCKET_NAME}/${srcKey}`,
+    Key: dstKey,
+    MetadataDirective: 'COPY',
+  }).promise();
+}
+
 async function uploadToWasabi(localPath, key) {
   const buffer = await fs.readFile(localPath);
   await wasabi
@@ -122,53 +131,55 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
   const star  = await Star.findOne({ _id: album.starId, userId: req.user.userId });
   if (!star)  return res.status(403).json({ message: 'Forbidden' });
 
-  /* object uit Wasabi verwijderen */
-  try {
-    await wasabi.deleteObject({
-      Bucket: process.env.WASABI_BUCKET_NAME,
-      Key:    photo.key,
-    }).promise();
-  } catch (e) {
-    console.warn('S3 delete warning:', e.message);
+  /* is deze key nog ergens anders in gebruik? */
+  const duplicates = await Photo.countDocuments({ key: photo.key });
+  if (duplicates === 1) {
+    /* alleen deze foto gebruikt die key – safe to delete */
+    try {
+      await wasabi.deleteObject({
+        Bucket: process.env.WASABI_BUCKET_NAME,
+        Key: photo.key,
+      }).promise();
+    } catch (e) {
+      console.warn('S3 delete warning:', e.message);
+    }
   }
 
   await photo.deleteOne();
   res.json({ message: 'Photo deleted' });
 });
 
-/* COPY */
+// POST /stars/:starId/photo-albums/:albumId/photos/copy
 router.post('/copy', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
-  const { photoIds }        = req.body;   // expect ["64f…", …]
+  const { photoIds = [] }  = req.body;
 
-  if (!Array.isArray(photoIds) || photoIds.length === 0) {
-    return res.status(400).json({ message: 'photoIds (array) required' });
+  try {
+    /* permissie-check op target-album */
+    const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+    const album = await PhotoAlbum.findOne({ _id: albumId, starId });
+    if (!star || !album) return res.status(404).json({ message: 'Forbidden' });
+
+    /* bron-foto’s ophalen */
+    const photos = await Photo.find({ _id: { $in: photoIds } });
+
+    /* parallel kopiëren */
+    await Promise.all(photos.map(async (p) => {
+      const newKey = `stars/${starId}/albums/${albumId}/${Date.now()}-${Math.random()
+        .toString(36).slice(2)}.jpg`;
+
+      /* ① object dupliceren in Wasabi */
+      await duplicateInWasabi(p.key, newKey);
+
+      /* ② nieuw DB-record */
+      await Photo.create({ photoAlbumId: albumId, key: newKey });
+    }));
+
+    res.json({ message: 'Copied', added: photos.length });
+  } catch (err) {
+    console.error('copy error:', err);
+    res.status(500).json({ message: 'Copy failed', error: err.message });
   }
-
-  /* permission check (same pattern as elsewhere) */
-  const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
-  const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-  if (!star || !album) {
-    return res.status(404).json({ message: 'Star/Album not found or forbidden' });
-  }
-
-  let copied = 0;
-  for (const pid of photoIds) {
-    const src = await Photo.findById(pid);
-    if (!src) continue;
-
-    const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
-    if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
-
-    await Photo.create({
-      photoAlbumId: albumId,
-      key:          src.key,            // reuse same Wasabi object
-      addedAt:      new Date(),
-    });
-    copied++;
-  }
-
-  res.json({ success: true, copiedCount: copied });
 });
 
 /* MOVE */
