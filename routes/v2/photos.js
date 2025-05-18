@@ -136,4 +136,77 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
   res.json({ message: 'Photo deleted' });
 });
 
+/* COPY */
+router.post('/copy', verifyToken, async (req, res) => {
+  const { starId, albumId } = req.params;
+  const { photoIds }        = req.body;   // expect ["64f…", …]
+
+  if (!Array.isArray(photoIds) || photoIds.length === 0) {
+    return res.status(400).json({ message: 'photoIds (array) required' });
+  }
+
+  /* permission check (same pattern as elsewhere) */
+  const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+  const album = await PhotoAlbum.findOne({ _id: albumId, starId });
+  if (!star || !album) {
+    return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+  }
+
+  let copied = 0;
+  for (const pid of photoIds) {
+    const src = await Photo.findById(pid);
+    if (!src) continue;
+
+    const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
+    if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
+
+    await Photo.create({
+      photoAlbumId: albumId,
+      key:          src.key,            // reuse same Wasabi object
+      addedAt:      new Date(),
+    });
+    copied++;
+  }
+
+  res.json({ success: true, copiedCount: copied });
+});
+
+/* MOVE */
+router.post('/move', verifyToken, async (req, res) => {
+  const { starId, albumId } = req.params;
+  const { photoIds }        = req.body;
+
+  if (!Array.isArray(photoIds) || photoIds.length === 0) {
+    return res.status(400).json({ message: 'photoIds (array) required' });
+  }
+
+  const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+  const album = await PhotoAlbum.findOne({ _id: albumId, starId });
+  if (!star || !album) {
+    return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+  }
+
+  let moved = 0;
+  for (const pid of photoIds) {
+    const src = await Photo.findById(pid);
+    if (!src) continue;
+
+    const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
+    if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
+
+    /* copy into destination */
+    await Photo.create({
+      photoAlbumId: albumId,
+      key:          src.key,
+      addedAt:      new Date(),
+    });
+
+    /* remove from original album */
+    await src.deleteOne();
+    moved++;
+  }
+
+  res.json({ success: true, movedCount: moved });
+});
+
 export default router;
