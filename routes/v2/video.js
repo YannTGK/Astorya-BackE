@@ -20,7 +20,7 @@ async function compressVideo(inPath, outPath) {
     console.log("[FFMPEG] Start compress:", inPath, "->", outPath);
     const ffmpeg = spawn('ffmpeg', [
       '-i', inPath,
-      '-vf', 'scale=1280:-2',
+      '-vf', 'scale=1280:-2,format=yuv420p', // ✅ voeg format toe
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '28',
