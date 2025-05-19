@@ -171,13 +171,22 @@ router.post('/copy', verifyToken, async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
 
+  // ✅ Bestaande keys in doelalbum ophalen
+  const existingVideos = await Video.find({ videoAlbumId: targetAlbumId });
+  const existingKeys = new Set(existingVideos.map((v) => v.key));
+
   const created = [];
+  let skipped = 0;
 
   for (const id of videoIds) {
     const original = await Video.findById(id);
     if (!original) continue;
 
-    // Video met zelfde key, nieuwe album
+    if (existingKeys.has(original.key)) {
+      skipped++;
+      continue; // ❌ Skip duplicaten
+    }
+
     const copy = new Video({
       videoAlbumId: targetAlbumId,
       key: original.key,
@@ -187,7 +196,11 @@ router.post('/copy', verifyToken, async (req, res) => {
     created.push(copy._id);
   }
 
-  res.json({ message: "Videos copied", copiedIds: created });
+  res.json({
+    message: `Videos copied: ${created.length}${skipped > 0 ? ` (${skipped} skipped)` : ""}`,
+    copiedIds: created,
+    skipped,
+  });
 });
 
 // POST /videos/move
@@ -223,7 +236,7 @@ router.post('/move', verifyToken, async (req, res) => {
     await video.save();
     moved.push(video._id);
   }
-  
+
   res.json({ message: "Videos moved", movedIds: moved });
 });
 
