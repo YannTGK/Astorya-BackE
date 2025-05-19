@@ -49,6 +49,7 @@ app.use('/api/photo-albums', photoAlbumsRoutes);
 app.use('/api/stars/:starId/photo-albums/:albumId/photos', photosRoutes);
 app.use('/api/photos', photosRoutes );
 app.use('/api/stars/:starId/video-albums', videoAlbumsRoutes);
+app.use('/api/video-albums', videoAlbumsRoutes);
 app.use("/api/stars/:starId/video-albums/:albumId/videos", videosRoutes); 
 app.use('/api/stars/:starId/audios', audioRoutes);
 app.use('/api/stars/:starId/messages', messagesRoutes);
