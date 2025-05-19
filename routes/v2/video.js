@@ -192,20 +192,19 @@ router.post('/copy', verifyToken, async (req, res) => {
 
 // POST /videos/move
 router.post('/move', verifyToken, async (req, res) => {
-  const { videoIds, targetAlbumId } = req.body;
+  const { videoIds } = req.body;
+  const targetAlbumId = req.params.albumId;
   const userId = req.user.userId;
 
   if (!Array.isArray(videoIds) || !targetAlbumId) {
     return res.status(400).json({ message: "Missing videoIds or targetAlbumId" });
   }
 
-  // ✅ Doelalbum checken
   const targetAlbum = await VideoAlbum.findById(targetAlbumId);
   if (!targetAlbum) {
     return res.status(404).json({ message: "Target album not found" });
   }
 
-  // ✅ Beveiliging: gebruiker moet toegang hebben tot bijhorende ster
   const star = await Star.findOne({ _id: targetAlbum.starId, userId });
   if (!star) {
     return res.status(403).json({ message: "Forbidden" });
@@ -217,7 +216,6 @@ router.post('/move', verifyToken, async (req, res) => {
     const video = await Video.findById(id);
     if (!video) continue;
 
-    // Check of gebruiker toegang heeft tot originele video
     const oldAlbum = await VideoAlbum.findById(video.videoAlbumId);
     if (!oldAlbum || !oldAlbum.starId.equals(targetAlbum.starId)) continue;
 
@@ -225,8 +223,7 @@ router.post('/move', verifyToken, async (req, res) => {
     await video.save();
     moved.push(video._id);
   }
-
-  console.log(`[MOVE] ${moved.length} videos verplaatst naar album ${targetAlbumId}`);
+  
   res.json({ message: "Videos moved", movedIds: moved });
 });
 
