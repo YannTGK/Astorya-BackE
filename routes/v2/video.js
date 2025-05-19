@@ -77,6 +77,8 @@ router.post(
   }
 );
 
+
+
 // ───────── GET / (lijst video’s) ─────────
 router.get('/', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
@@ -148,6 +150,84 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
     console.error('[DELETE VIDEO ERROR]', err);
     res.status(500).json({ message: 'Delete error', error: err.message });
   }
+});
+
+// POST /videos/copy
+router.post('/copy', verifyToken, async (req, res) => {
+  const { videoIds, targetAlbumId } = req.body;
+  const userId = req.user.userId;
+
+  if (!Array.isArray(videoIds) || !targetAlbumId) {
+    return res.status(400).json({ message: "Missing videoIds or targetAlbumId" });
+  }
+
+  const targetAlbum = await VideoAlbum.findById(targetAlbumId);
+  if (!targetAlbum) {
+    return res.status(404).json({ message: "Target album not found" });
+  }
+
+  const star = await Star.findOne({ _id: targetAlbum.starId, userId });
+  if (!star) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const created = [];
+
+  for (const id of videoIds) {
+    const original = await Video.findById(id);
+    if (!original) continue;
+
+    // Video met zelfde key, nieuwe album
+    const copy = new Video({
+      videoAlbumId: targetAlbumId,
+      key: original.key,
+    });
+
+    await copy.save();
+    created.push(copy._id);
+  }
+
+  res.json({ message: "Videos copied", copiedIds: created });
+});
+
+// POST /videos/move
+router.post('/move', verifyToken, async (req, res) => {
+  const { videoIds, targetAlbumId } = req.body;
+  const userId = req.user.userId;
+
+  if (!Array.isArray(videoIds) || !targetAlbumId) {
+    return res.status(400).json({ message: "Missing videoIds or targetAlbumId" });
+  }
+
+  // ✅ Doelalbum checken
+  const targetAlbum = await VideoAlbum.findById(targetAlbumId);
+  if (!targetAlbum) {
+    return res.status(404).json({ message: "Target album not found" });
+  }
+
+  // ✅ Beveiliging: gebruiker moet toegang hebben tot bijhorende ster
+  const star = await Star.findOne({ _id: targetAlbum.starId, userId });
+  if (!star) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const moved = [];
+
+  for (const id of videoIds) {
+    const video = await Video.findById(id);
+    if (!video) continue;
+
+    // Check of gebruiker toegang heeft tot originele video
+    const oldAlbum = await VideoAlbum.findById(video.videoAlbumId);
+    if (!oldAlbum || !oldAlbum.starId.equals(targetAlbum.starId)) continue;
+
+    video.videoAlbumId = targetAlbumId;
+    await video.save();
+    moved.push(video._id);
+  }
+
+  console.log(`[MOVE] ${moved.length} videos verplaatst naar album ${targetAlbumId}`);
+  res.json({ message: "Videos moved", movedIds: moved });
 });
 
 export default router;
