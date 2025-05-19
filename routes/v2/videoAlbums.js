@@ -83,4 +83,35 @@ router.put('/detail/:albumId', verifyToken, async (req, res) => {
   }
 });
 
+// DELETE /stars/:starId/video-albums/:albumId
+router.delete('/:albumId', verifyToken, async (req, res) => {
+  const { starId, albumId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const album = await VideoAlbum.findById(albumId);
+    if (!album) return res.status(404).json({ message: 'Album not found' });
+
+    const star = await Star.findOne({ _id: album.starId, userId });
+    if (!star) return res.status(403).json({ message: 'Forbidden' });
+
+    // Optioneel: controleer of album bij deze ster hoort
+    if (!album.starId.equals(starId)) {
+      return res.status(403).json({ message: 'Forbidden: album does not belong to this star' });
+    }
+
+    // Verwijder alle video's in dit album
+    const Video = (await import('../../models/v2/Video.js')).default;
+    await Video.deleteMany({ videoAlbumId: albumId });
+
+    // Verwijder het album zelf
+    await VideoAlbum.findByIdAndDelete(albumId);
+
+    res.json({ message: 'Album and its videos deleted' });
+  } catch (err) {
+    console.error('[DELETE VIDEO-ALBUM ERROR]', err);
+    res.status(500).json({ message: 'Could not delete album', error: err.message });
+  }
+});
+
 export default router;
