@@ -36,52 +36,51 @@ router.post('/', verifyToken, async (req, res) => {
     }
   });
 
-// PUT /video-albums/:albumId
-router.put('/:albumId', verifyToken, async (req, res) => {
-    const { albumId } = req.params;
-    const { name, sharedWith } = req.body; // Fields you want to update
-  
-    try {
-      const album = await VideoAlbum.findById(albumId);
-      if (!album) return res.status(404).json({ message: 'Video album not found' });
-  
-      const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
-      if (!star) return res.status(403).json({ message: 'Forbidden' });
-  
-      // Update the fields if provided
-      if (name) album.name = name;
-      if (sharedWith) album.sharedWith = sharedWith;
-  
-      album.updatedAt = new Date();
-      await album.save();
-  
-      res.json(album);
-    } catch (err) {
-      res.status(400).json({ message: 'Could not update video album', error: err.message });
+// GET /video-albums/detail/:albumId
+router.get('/detail/:albumId', verifyToken, async (req, res) => {
+  try {
+    const album = await VideoAlbum.findById(req.params.albumId);
+    if (!album) {
+      return res.status(404).json({ message: 'Video album not found' });
     }
+
+    const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
+    if (!star) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    res.json(album);
+  } catch (err) {
+    console.error('[GET VIDEO-ALBUM DETAIL ERROR]', err);
+    res.status(500).json({ message: 'Could not fetch album detail', error: err.message });
+  }
 });
 
-// GET /video-albums/:albumId
-router.get('/:albumId', verifyToken, async (req, res) => {
-  const album = await VideoAlbum.findById(req.params.albumId);
-  if (!album) return res.status(404).json({ message: 'Video album not found' });
+// PUT /video-albums/detail/:albumId
+router.put('/detail/:albumId', verifyToken, async (req, res) => {
+  try {
+    const album = await VideoAlbum.findById(req.params.albumId);
+    if (!album) {
+      return res.status(404).json({ message: 'Video album not found' });
+    }
 
-  const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
-  if (!star) return res.status(403).json({ message: 'Forbidden' });
+    const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
+    if (!star) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
 
-  res.json(album);
-});
+    // Update only allowed fields
+    if (req.body.canView) album.canView = req.body.canView;
+    if (req.body.canEdit) album.canEdit = req.body.canEdit;
 
-// DELETE /video-albums/:albumId
-router.delete('/:albumId', verifyToken, async (req, res) => {
-  const album = await VideoAlbum.findById(req.params.albumId);
-  if (!album) return res.status(404).json({ message: 'Video album not found' });
+    album.updatedAt = new Date();
+    await album.save();
 
-  const star = await Star.findOne({ _id: album.starId, userId: req.user.userId });
-  if (!star) return res.status(403).json({ message: 'Forbidden' });
-
-  await album.deleteOne();
-  res.json({ message: 'Video album deleted' });
+    res.json({ message: 'Video album updated', album });
+  } catch (err) {
+    console.error('[PUT VIDEO-ALBUM DETAIL ERROR]', err);
+    res.status(500).json({ message: 'Could not update album', error: err.message });
+  }
 });
 
 export default router;
