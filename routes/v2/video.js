@@ -16,7 +16,7 @@ const upload = multer({ dest: 'uploads/temp/' });
 
 // ───────── Helper: FFmpeg video compress ─────────
 async function compressVideo(inPath, outPath) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     console.log("[FFMPEG] Start compress:", inPath, "->", outPath);
     const ffmpeg = spawn('ffmpeg', [
       '-i', inPath,
@@ -28,15 +28,23 @@ async function compressVideo(inPath, outPath) {
       '-b:a', '128k',
       outPath
     ]);
+
     ffmpeg.stdout.on('data', d => process.stdout.write(d));
     ffmpeg.stderr.on('data', d => process.stderr.write(d));
+
     ffmpeg.on('close', code => {
       if (code === 0) {
         console.log("[FFMPEG] Finished:", outPath);
-        resolve();
+        resolve(true); // success
       } else {
-        reject(new Error(`FFmpeg exited with code ${code}`));
+        console.warn(`[FFMPEG] Failed with code ${code}, skipping compression`);
+        resolve(false); // fallback
       }
+    });
+
+    ffmpeg.on('error', err => {
+      console.error("[FFMPEG] Failed to start process:", err.message);
+      resolve(false); // fallback
     });
   });
 }
@@ -54,6 +62,7 @@ async function uploadToWasabi(localPath, key, contentType) {
   console.log("[WASABI] Uploaded:", key);
 }
 
+
 // ───────── POST /upload (Upload een video) ─────────
 router.post(
   '/upload',
@@ -61,45 +70,63 @@ router.post(
   upload.single('video'),
   async (req, res) => {
     const { starId, albumId } = req.params;
+
     try {
       console.log("[UPLOAD] User:", req.user.userId, "Star:", starId, "Album:", albumId);
 
-      // Multer file info
+      // ✅ Check of file bestaat
       if (!req.file) {
         console.error("[ERROR] No video file uploaded");
         return res.status(400).json({ message: "No video file uploaded" });
       }
       console.log("[UPLOAD] Uploaded file:", req.file);
 
-      // Check rechten
-      const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+      // ✅ Check of gebruiker toegang heeft tot ster en album
+      const star = await Star.findOne({ _id: starId, userId: req.user.userId });
       const album = await VideoAlbum.findOne({ _id: albumId, starId });
+
       if (!star || !album) {
         console.error("[ERROR] Geen toegang tot ster/album");
         return res.status(404).json({ message: 'Star/Album not found or forbidden' });
       }
 
-      // Compressie
-      const tmpIn  = req.file.path;
+      // ✅ Compressie voorbereiden
+      const tmpIn = req.file.path;
       const tmpOut = `${tmpIn}-compressed.mp4`;
-      await compressVideo(tmpIn, tmpOut);
 
-      // Upload naar Wasabi
+      // ✅ Probeer te comprimeren met fallback
+      let didCompress = false;
+      try {
+        await compressVideo(tmpIn, tmpOut);
+        didCompress = true;
+        console.log("[FFMPEG] Compression succeeded");
+      } catch (err) {
+        console.warn("[FFMPEG] Compression failed, using original:", err.message);
+      }
+
+      const finalPath = didCompress ? tmpOut : tmpIn;
+
+      // ✅ Upload naar Wasabi
       const key = `stars/${starId}/video-albums/${albumId}/${Date.now()}.mp4`;
-      await uploadToWasabi(tmpOut, key, 'video/mp4');
+      await uploadToWasabi(finalPath, key, 'video/mp4');
 
-      // DB opslaan (LET OP: kleine letter 'key'!)
+      // ✅ Opslaan in database
       const video = await Video.create({ videoAlbumId: albumId, key });
-      console.log("[DB] Video record aangemaakt:", video);
+      console.log("[DB] Video record aangemaakt:", video._id);
 
-      // Clean up
-      await fs.unlink(tmpIn).catch(()=>{});
-      await fs.unlink(tmpOut).catch(()=>{});
+      // ✅ Cleanup tijdelijke bestanden
+      await fs.unlink(tmpIn).catch(() => {});
+      if (didCompress) {
+        await fs.unlink(tmpOut).catch(() => {});
+      }
 
-      res.status(201).json({ message: 'Video uploaded', video });
+      return res.status(201).json({ message: 'Video uploaded', video });
     } catch (err) {
       console.error('[FATAL UPLOAD ERROR]', err);
-      res.status(500).json({ message: 'Upload failed', error: err.message });
+      return res.status(500).json({
+        message: 'Upload failed',
+        error: err.message,
+      });
     }
   }
 );
