@@ -1,7 +1,6 @@
 import express   from 'express';
 import multer    from 'multer';
 import fs        from 'fs/promises';
-import { spawn } from 'child_process';
 
 import wasabi    from '../../utils/wasabiClient.js';
 import { presign } from '../../utils/presign.js';
@@ -13,41 +12,6 @@ import verifyToken from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
 const upload = multer({ dest: 'uploads/temp/' });
-
-// ───────── Helper: FFmpeg video compress ─────────
-async function compressVideo(inPath, outPath) {
-  return new Promise((resolve) => {
-    console.log("[FFMPEG] Start compress:", inPath, "->", outPath);
-    const ffmpeg = spawn('ffmpeg', [
-      '-i', inPath,
-      '-vf', 'scale=1280:-2,format=yuv420p', // ✅ voeg format toe
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '28',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      outPath
-    ]);
-
-    ffmpeg.stdout.on('data', d => process.stdout.write(d));
-    ffmpeg.stderr.on('data', d => process.stderr.write(d));
-
-    ffmpeg.on('close', code => {
-      if (code === 0) {
-        console.log("[FFMPEG] Finished:", outPath);
-        resolve(true); // success
-      } else {
-        console.warn(`[FFMPEG] Failed with code ${code}, skipping compression`);
-        resolve(false); // fallback
-      }
-    });
-
-    ffmpeg.on('error', err => {
-      console.error("[FFMPEG] Failed to start process:", err.message);
-      resolve(false); // fallback
-    });
-  });
-}
 
 // ───────── Helper: Upload to Wasabi ─────────
 async function uploadToWasabi(localPath, key, contentType) {
@@ -61,7 +25,6 @@ async function uploadToWasabi(localPath, key, contentType) {
   }).promise();
   console.log("[WASABI] Uploaded:", key);
 }
-
 
 // ───────── POST /upload (Upload een video) ─────────
 router.post(
@@ -90,35 +53,18 @@ router.post(
         return res.status(404).json({ message: 'Star/Album not found or forbidden' });
       }
 
-      // ✅ Compressie voorbereiden
-      const tmpIn = req.file.path;
-      const tmpOut = `${tmpIn}-compressed.mp4`;
-
-      // ✅ Probeer te comprimeren met fallback
-      let didCompress = false;
-      try {
-        await compressVideo(tmpIn, tmpOut);
-        didCompress = true;
-        console.log("[FFMPEG] Compression succeeded");
-      } catch (err) {
-        console.warn("[FFMPEG] Compression failed, using original:", err.message);
-      }
-
-      const finalPath = didCompress ? tmpOut : tmpIn;
-
-      // ✅ Upload naar Wasabi
+      const filePath = req.file.path;
       const key = `stars/${starId}/video-albums/${albumId}/${Date.now()}.mp4`;
-      await uploadToWasabi(finalPath, key, 'video/mp4');
+
+      // ✅ Upload originele bestand naar Wasabi
+      await uploadToWasabi(filePath, key, 'video/mp4');
 
       // ✅ Opslaan in database
       const video = await Video.create({ videoAlbumId: albumId, key });
       console.log("[DB] Video record aangemaakt:", video._id);
 
       // ✅ Cleanup tijdelijke bestanden
-      await fs.unlink(tmpIn).catch(() => {});
-      if (didCompress) {
-        await fs.unlink(tmpOut).catch(() => {});
-      }
+      await fs.unlink(filePath).catch(() => {});
 
       return res.status(201).json({ message: 'Video uploaded', video });
     } catch (err) {
