@@ -3,11 +3,11 @@ import express  from 'express';
 import multer   from 'multer';
 import fs       from 'fs/promises';
 
-import wasabi   from '../../utils/wasabiClient.js';
+import wasabi      from '../../utils/wasabiClient.js';
 import { presign } from '../../utils/presign.js';
 
-import Audio     from '../../models/v2/Audio.js';
-import Star      from '../../models/v2/Star.js';
+import Audio       from '../../models/v2/Audio.js';
+import Star        from '../../models/v2/Star.js';
 import verifyToken from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
@@ -20,7 +20,7 @@ async function uploadToWasabi(localPath, key, contentType) {
     Bucket: process.env.WASABI_BUCKET_NAME,
     Key:    key,
     Body:   buffer,
-    ACL:    'public-read',    // of weghalen voor privé
+    ACL:    'public-read',
     ContentType: contentType,
   }).promise();
 }
@@ -43,19 +43,14 @@ router.post(
     const { title = 'Untitled', description = '', canView = [], canEdit = [] } = req.body;
 
     try {
-      // permissie‐check
       const star = await Star.findOne({ _id: starId, userId: req.user.userId });
-      if (!star) {
-        return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
-      }
+      if (!star) return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
 
-      // bestand uploaden naar Wasabi
       const tmp         = req.file.path;
       const key         = `stars/${starId}/audios/${Date.now()}-${req.file.originalname}`;
       const contentType = req.file.mimetype || 'audio/mpeg';
       await uploadToWasabi(tmp, key, contentType);
 
-      // DB‐record aanmaken
       const audio = await Audio.create({
         starId,
         title,
@@ -65,9 +60,7 @@ router.post(
         canEdit: normalizeIds(canEdit),
       });
 
-      // tijdelijke bestanden opruimen
       await fs.unlink(tmp).catch(() => {});
-
       res.status(201).json({ message: 'Audio uploaded', audio });
     } catch (err) {
       console.error('Upload error:', err);
@@ -76,30 +69,29 @@ router.post(
   }
 );
 
-/* ───────── GET /       – lijst audios ───────── */
+/* ───────── GET / – lijst audios ───────── */
 router.get('/', verifyToken, async (req, res) => {
+  const { starId } = req.params;
   try {
-    const { starId } = req.params;
     const star = await Star.findOne({ _id: starId, userId: req.user.userId });
-    if (!star) {
-      return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
-    }
+    if (!star) return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
 
     const audios = await Audio.find({ starId });
+
+    // presign 1u geldig
     const out = await Promise.all(
       audios.map(async a => ({
-        _id, title, description, addedAt = a.addedAt,
-        _id: a._id,
-        title: a.title,
+        _id:         a._id,
+        title:       a.title,
         description: a.description,
-        url: await presign(a.key, 3600),
-        canView: a.canView,
-        canEdit: a.canEdit,
-        addedAt: a.addedAt,
+        url:         await presign(a.key, 3600),
+        canView:     a.canView,
+        canEdit:     a.canEdit,
+        addedAt:     a.addedAt,
       }))
     );
-    res.json(out);
 
+    res.json(out);
   } catch (err) {
     console.error('List error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -110,14 +102,10 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
     const audio = await Audio.findById(req.params.id);
-    if (!audio) {
-      return res.status(404).json({ message: 'Audio niet gevonden' });
-    }
+    if (!audio) return res.status(404).json({ message: 'Audio niet gevonden' });
 
     const star = await Star.findOne({ _id: audio.starId, userId: req.user.userId });
-    if (!star) {
-      return res.status(403).json({ message: 'Geen toegang' });
-    }
+    if (!star) return res.status(403).json({ message: 'Geen toegang' });
 
     res.json({
       _id:         audio._id,
@@ -144,31 +132,23 @@ router.put(
     const { title, description, canView = [], canEdit = [] } = req.body;
 
     try {
-      // bestáát audio?
       const audio = await Audio.findById(id);
-      if (!audio) {
-        return res.status(404).json({ message: 'Audio niet gevonden' });
-      }
-      // permissie‐check via Star
-      const star = await Star.findOne({ _id: audio.starId, userId: req.user.userId });
-      if (!star) {
-        return res.status(403).json({ message: 'Geen toegang' });
-      }
+      if (!audio) return res.status(404).json({ message: 'Audio niet gevonden' });
 
-      // nieuw bestand?
+      const star = await Star.findOne({ _id: audio.starId, userId: req.user.userId });
+      if (!star) return res.status(403).json({ message: 'Geen toegang' });
+
       if (req.file) {
         const tmp    = req.file.path;
         const newKey = `stars/${audio.starId}/audios/${Date.now()}-${req.file.originalname}`;
         const ct     = req.file.mimetype || 'audio/mpeg';
-
         await uploadToWasabi(tmp, newKey, ct);
 
-        // oude key verwijderen als uniek
         const count = await Audio.countDocuments({ key: audio.key });
         if (count === 1) {
           await wasabi.deleteObject({
             Bucket: process.env.WASABI_BUCKET_NAME,
-            Key: audio.key
+            Key:    audio.key,
           }).promise().catch(e => console.warn('Wasabi delete warning:', e.message));
         }
 
@@ -176,7 +156,6 @@ router.put(
         await fs.unlink(tmp).catch(() => {});
       }
 
-      // metadata updaten
       if (typeof title === 'string')       audio.title       = title;
       if (typeof description === 'string') audio.description = description;
       audio.canView = normalizeIds(canView);
@@ -213,7 +192,7 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
     if (count === 1) {
       await wasabi.deleteObject({
         Bucket: process.env.WASABI_BUCKET_NAME,
-        Key: audio.key
+        Key:    audio.key,
       }).promise().catch(e => console.warn('Wasabi delete warning:', e.message));
     }
 
