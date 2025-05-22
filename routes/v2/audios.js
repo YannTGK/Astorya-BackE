@@ -16,15 +16,21 @@ const upload = multer({ dest: 'uploads/temp/' });
 /* ───────── helper ───────── */
 async function uploadToWasabi(localPath, key, contentType) {
   const buffer = await fs.readFile(localPath);
-  await wasabi
-    .upload({
-      Bucket: process.env.WASABI_BUCKET_NAME,
-      Key:    key,
-      Body:   buffer,
-      ACL:    'public-read',    // of laat weg voor privé
-      ContentType: contentType,
-    })
-    .promise();
+  await wasabi.upload({
+    Bucket: process.env.WASABI_BUCKET_NAME,
+    Key:    key,
+    Body:   buffer,
+    ACL:    'public-read',    // of weghalen voor privé
+    ContentType: contentType,
+  }).promise();
+}
+
+function normalizeIds(field) {
+  if (Array.isArray(field)) return field.filter(Boolean);
+  if (typeof field === 'string' && field.length) {
+    return field.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 /* ───────── POST  /upload ───────── */
@@ -34,32 +40,32 @@ router.post(
   upload.single('audio'),
   async (req, res) => {
     const { starId } = req.params;
-    const { title = 'Untitled', description = '', sharedWith = '' } = req.body;
+    const { title = 'Untitled', description = '', canView = [], canEdit = [] } = req.body;
 
     try {
       // permissie‐check
       const star = await Star.findOne({ _id: starId, userId: req.user.userId });
       if (!star) {
-        return res.status(404).json({ message: 'Star not found of geen toegang' });
+        return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
       }
 
-      // upload raw bestand
-      const tmp = req.file.path;
-      const key = `stars/${starId}/audios/${Date.now()}-${req.file.originalname}`;
+      // bestand uploaden naar Wasabi
+      const tmp         = req.file.path;
+      const key         = `stars/${starId}/audios/${Date.now()}-${req.file.originalname}`;
       const contentType = req.file.mimetype || 'audio/mpeg';
       await uploadToWasabi(tmp, key, contentType);
 
-      // DB‐record
+      // DB‐record aanmaken
       const audio = await Audio.create({
         starId,
         title,
         description,
         key,
-        canView: sharedWith.split(',').filter(Boolean),
-        canEdit: []
+        canView: normalizeIds(canView),
+        canEdit: normalizeIds(canEdit),
       });
 
-      // cleanup
+      // tijdelijke bestanden opruimen
       await fs.unlink(tmp).catch(() => {});
 
       res.status(201).json({ message: 'Audio uploaded', audio });
@@ -72,27 +78,28 @@ router.post(
 
 /* ───────── GET /       – lijst audios ───────── */
 router.get('/', verifyToken, async (req, res) => {
-  const { starId } = req.params;
   try {
+    const { starId } = req.params;
     const star = await Star.findOne({ _id: starId, userId: req.user.userId });
     if (!star) {
       return res.status(404).json({ message: 'Star niet gevonden of geen toegang' });
     }
 
     const audios = await Audio.find({ starId });
-
-    // presign 1u geldig
     const out = await Promise.all(
       audios.map(async a => ({
-        _id:       a._id,
-        title:     a.title,
+        _id, title, description, addedAt = a.addedAt,
+        _id: a._id,
+        title: a.title,
         description: a.description,
-        url:       await presign(a.key, 3600),
-        addedAt:   a.addedAt,
+        url: await presign(a.key, 3600),
+        canView: a.canView,
+        canEdit: a.canEdit,
+        addedAt: a.addedAt,
       }))
     );
-
     res.json(out);
+
   } catch (err) {
     console.error('List error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -116,7 +123,9 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
       _id:         audio._id,
       title:       audio.title,
       description: audio.description,
-      url:         await presign(audio.key, 3600 * 10), // langer geldig
+      url:         await presign(audio.key, 3600 * 10),
+      canView:     audio.canView,
+      canEdit:     audio.canEdit,
       addedAt:     audio.addedAt,
     });
   } catch (err) {
@@ -125,29 +134,87 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
   }
 });
 
+/* ───────── PUT /detail/:id ───────── */
+router.put(
+  '/detail/:id',
+  verifyToken,
+  upload.single('audio'),
+  async (req, res) => {
+    const { id } = req.params;
+    const { title, description, canView = [], canEdit = [] } = req.body;
+
+    try {
+      // bestáát audio?
+      const audio = await Audio.findById(id);
+      if (!audio) {
+        return res.status(404).json({ message: 'Audio niet gevonden' });
+      }
+      // permissie‐check via Star
+      const star = await Star.findOne({ _id: audio.starId, userId: req.user.userId });
+      if (!star) {
+        return res.status(403).json({ message: 'Geen toegang' });
+      }
+
+      // nieuw bestand?
+      if (req.file) {
+        const tmp    = req.file.path;
+        const newKey = `stars/${audio.starId}/audios/${Date.now()}-${req.file.originalname}`;
+        const ct     = req.file.mimetype || 'audio/mpeg';
+
+        await uploadToWasabi(tmp, newKey, ct);
+
+        // oude key verwijderen als uniek
+        const count = await Audio.countDocuments({ key: audio.key });
+        if (count === 1) {
+          await wasabi.deleteObject({
+            Bucket: process.env.WASABI_BUCKET_NAME,
+            Key: audio.key
+          }).promise().catch(e => console.warn('Wasabi delete warning:', e.message));
+        }
+
+        audio.key = newKey;
+        await fs.unlink(tmp).catch(() => {});
+      }
+
+      // metadata updaten
+      if (typeof title === 'string')       audio.title       = title;
+      if (typeof description === 'string') audio.description = description;
+      audio.canView = normalizeIds(canView);
+      audio.canEdit = normalizeIds(canEdit);
+
+      await audio.save();
+
+      res.json({
+        _id:         audio._id,
+        title:       audio.title,
+        description: audio.description,
+        url:         await presign(audio.key, 3600),
+        canView:     audio.canView,
+        canEdit:     audio.canEdit,
+        addedAt:     audio.addedAt,
+      });
+    } catch (err) {
+      console.error('Update error:', err);
+      res.status(500).json({ message: 'Update mislukt', error: err.message });
+    }
+  }
+);
+
 /* ───────── DELETE /detail/:id ───────── */
 router.delete('/detail/:id', verifyToken, async (req, res) => {
   try {
     const audio = await Audio.findById(req.params.id);
-    if (!audio) {
-      return res.status(404).json({ message: 'Audio niet gevonden' });
-    }
+    if (!audio) return res.status(404).json({ message: 'Audio niet gevonden' });
 
     const star = await Star.findOne({ _id: audio.starId, userId: req.user.userId });
-    if (!star) {
-      return res.status(403).json({ message: 'Geen toegang' });
-    }
+    if (!star) return res.status(403).json({ message: 'Geen toegang' });
 
-    // alleen echte verwijdering in Wasabi als nergens anders gebruikt
     const count = await Audio.countDocuments({ key: audio.key });
     if (count === 1) {
-      try {
-        await wasabi
-          .deleteObject({ Bucket: process.env.WASABI_BUCKET_NAME, Key: audio.key })
-          .promise();
-      } catch (e) {
-        console.warn('Wasabi delete warning:', e.message);
-      }
+      await wasabi.deleteObject({
+        Bucket: process.env.WASABI_BUCKET_NAME,
+        Key: audio.key
+      }).promise().catch(e => console.warn('Wasabi delete warning:', e.message));
     }
 
     await audio.deleteOne();
