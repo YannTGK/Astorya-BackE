@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
 
 const documentSchema = new mongoose.Schema({
-  starId : { type: mongoose.Schema.Types.ObjectId, ref: "Star", required: true },
+  starId: { type: mongoose.Schema.Types.ObjectId, ref: "Star", required: true },
 
-  /** Enige opslag in DB = S3-key (géén publieke URL) */
-  key    : { type: String, required: true },
+  /*  opslag-key in Wasabi  (b.v. stars/STARID/documents/1717…-invoice.pdf)  */
+  key: { type: String, required: true },
+
+  /*  originele bestandsnaam die we tonen in de UI  */
+  originalName: { type: String, required: true },
+
   docType: { type: String, default: "pdf" },
 
   canView: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],

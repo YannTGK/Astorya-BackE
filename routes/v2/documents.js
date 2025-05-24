@@ -31,41 +31,49 @@ const asArray = (v) =>
     ? v.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
 
-/* ---------------------------------------------------------------------- */
-/* POST  /stars/:starId/documents/upload -------------------------------- */
+
+/* helper om mimetype → extensie te krijgen (heel simpel) */
+const mimeToExt = (mime = "") =>
+  mime.includes("pdf")  ? "pdf"  :
+  mime.includes("word") ? "word" :
+  mime.includes("officedocument") ? "word" :
+  mime.includes("msword") ? "word" : "file";
+
+/* ---------- UPLOAD ---------- */
 router.post(
   "/upload",
   verifyJWT,
   upload.single("document"),
   async (req, res) => {
-    const { starId }                 = req.params;
-    const { docType, canView, canEdit } = req.body;
+    const { starId } = req.params;
+    const { canView = [], canEdit = [] } = req.body;
 
     try {
-      /* owner-check ----------------------------------------------------- */
       const star = await Star.findOne({ _id: starId, userId: req.user.userId });
       if (!star) return res.status(404).json({ message: "Star not found or forbidden" });
 
-      /* upload ---------------------------------------------------------- */
-      const tmpPath = req.file.path;
-      const key     = `stars/${starId}/documents/${Date.now()}-${req.file.originalname}`;
+      /* 1. upload naar Wasabi */
+      const originalName = req.file.originalname;
+      const key = `stars/${starId}/documents/${Date.now()}-${originalName}`;
+      await uploadToWasabi(req.file.path, key, req.file.mimetype || "application/octet-stream");
+      await fs.unlink(req.file.path).catch(() => {});
 
-      await uploadToWasabi(tmpPath, key, req.file.mimetype || "application/octet-stream");
-      await fs.unlink(tmpPath).catch(() => {});
+      /* 2. helpers om string -> array te maken */
+      const toArr = (v) =>
+        Array.isArray(v) ? v :
+        typeof v === "string" && v.trim() ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
 
-      /* save in DB ------------------------------------------------------ */
-      const doc = await Document.create({
+      /* 3. opslaan in DB */
+      const newDoc = await Document.create({
         starId,
         key,
-        docType : docType || "pdf",
-        canView : asArray(canView),
-        canEdit : asArray(canEdit),
+        originalName,
+        docType: mimeToExt(req.file.mimetype),
+        canView: toArr(canView),
+        canEdit: toArr(canEdit),
       });
 
-      /* één presigned URL meegeven voor directe preview/download */
-      const url = await presign(key);
-
-      res.status(201).json({ ...doc.toObject(), presignedUrl: url });
+      res.status(201).json(newDoc);
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Document upload failed", error: err.message });
@@ -115,47 +123,55 @@ router.get("/:documentId", verifyJWT, async (req, res) => {
   }
 });
 
-/* ---------------------------------------------------------------------- */
-/* PUT  /stars/:starId/documents/:documentId ----------------------------- */
+
+/* ---------- UPDATE ---------- */
 router.put(
   "/:documentId",
   verifyJWT,
-  upload.single("document"),
+  upload.single("document"),      // mag ontbreken
   async (req, res) => {
     const { starId, documentId } = req.params;
     const { docType, canView, canEdit } = req.body;
 
+    const toArr = (v) =>
+      Array.isArray(v) ? v :
+      typeof v === "string" && v.trim() ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
     try {
       const doc = await Document.findById(documentId);
-      if (!doc || doc.starId.toString() !== starId)
+      if (!doc || doc.starId.toString() !== starId) {
         return res.status(404).json({ message: "Document not found" });
-
-      const owner   = await Star.findOne({ _id: starId, userId: req.user.userId });
-      const canEditU = doc.canEdit.map(String).includes(req.user.userId);
-      if (!owner && !canEditU) return res.status(403).json({ message: "Forbidden" });
-
-      /* vervang bestand? */
-      if (req.file) {
-        const tmpPath = req.file.path;
-        const newKey  = `stars/${starId}/documents/${Date.now()}-${req.file.originalname}`;
-        await uploadToWasabi(tmpPath, newKey, req.file.mimetype || "application/octet-stream");
-        await fs.unlink(tmpPath).catch(() => {});
-        doc.key = newKey;
       }
 
-      if (docType) doc.docType = docType;
-      if (canView) doc.canView = asArray(canView);
-      if (canEdit) doc.canEdit = asArray(canEdit);
+      /* rechten */
+      const isOwner = await Star.exists({ _id: starId, userId: req.user.userId });
+      const canEditUser = doc.canEdit.map(String).includes(req.user.userId);
+      if (!isOwner && !canEditUser) return res.status(403).json({ message: "Forbidden" });
+
+      /* eventueel nieuwe file */
+      if (req.file) {
+        const originalName = req.file.originalname;
+        const key = `stars/${starId}/documents/${Date.now()}-${originalName}`;
+        await uploadToWasabi(req.file.path, key, req.file.mimetype || "application/octet-stream");
+        await fs.unlink(req.file.path).catch(() => {});
+
+        doc.key = key;
+        doc.originalName = originalName;
+        doc.docType = mimeToExt(req.file.mimetype);
+      }
+
+      if (docType)     doc.docType = docType;
+      if (canView)     doc.canView = toArr(canView);
+      if (canEdit)     doc.canEdit = toArr(canEdit);
 
       await doc.save();
-      res.json({ message: "Document updated", document: { ...doc.toObject(), presignedUrl: await presign(doc.key) } });
+      res.json({ message: "Document updated", document: doc });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Update failed", error: err.message });
     }
   }
 );
-
 /* ---------------------------------------------------------------------- */
 /* DELETE  /stars/:starId/documents/:documentId (owner) ------------------ */
 router.delete("/:documentId", verifyJWT, async (req, res) => {
