@@ -1,16 +1,14 @@
-// routes/v2/vrRooms.js
+// routes/v2/threeDRooms.js
 import express      from 'express';
-import VRRoom       from '../../models/v2/VRRoom.js';
+import ThreeDRoom from '../../models/v2/ThreeDRoom.js';
 import Star         from '../../models/v2/Star.js';
 import verifyToken  from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
 
-/* ───────────────────────── Genest onder /api/v2/stars/:starId/vr-rooms ────────────────────────── */
+/* ────────────────────── Genest (/api/v2/stars/:starId/three-d-rooms) ────────────────────── */
 
-/**
- * GET – alle VR-Rooms voor een specifieke ster (alleen eigenaar)
- */
+/** GET – alle 3D-rooms van een ster (alleen eigenaar) */
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
   if (!starId) return res.status(400).json({ message: 'Missing starId in route' });
@@ -19,16 +17,14 @@ router.get('/', verifyToken, async (req, res) => {
   if (!star) return res.status(404).json({ message: 'Star not found or forbidden' });
 
   try {
-    const rooms = await VRRoom.find({ starId });
+    const rooms = await ThreeDRoom.find({ starId });
     res.json(rooms);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-/**
- * POST – nieuwe VR-Room aanmaken
- */
+/** POST – nieuwe 3D-room aanmaken */
 router.post('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
   if (!starId) return res.status(400).json({ message: 'Missing starId in route' });
@@ -44,7 +40,7 @@ router.post('/', verifyToken, async (req, res) => {
       canEdit  = [],
     } = req.body;
 
-    const newRoom = await VRRoom.create({
+    const newRoom = await ThreeDRoom.create({
       starId,
       roomType,
       name,
@@ -54,19 +50,17 @@ router.post('/', verifyToken, async (req, res) => {
 
     res.status(201).json(newRoom);
   } catch (err) {
-    res.status(400).json({ message: 'Could not create VR room', error: err.message });
+    res.status(400).json({ message: 'Could not create 3D room', error: err.message });
   }
 });
 
-/* ───────────────────────── Niet-genest onder /api/v2/vrRooms/detail/:id ────────────────────────── */
+/* ────────────────────── Niet-genest (/api/v2/three-d-rooms/detail/:id) ────────────────────── */
 
-/**
- * GET – details van één VR-Room
- */
+/** GET – details van één 3D-room */
 router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
-    const room = await VRRoom.findById(req.params.id);
-    if (!room) return res.status(404).json({ message: 'VR Room not found' });
+    const room = await ThreeDRoom.findById(req.params.id);
+    if (!room) return res.status(404).json({ message: '3D Room not found' });
 
     const star = await Star.findOne({ _id: room.starId, userId: req.user.userId });
     if (!star) return res.status(403).json({ message: 'Forbidden' });
@@ -77,13 +71,11 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
   }
 });
 
-/**
- * PUT – VR-Room bijwerken
- */
+/** PUT – 3D-room bijwerken */
 router.put('/detail/:id', verifyToken, async (req, res) => {
   try {
-    const room = await VRRoom.findById(req.params.id);
-    if (!room) return res.status(404).json({ message: 'VR Room not found' });
+    const room = await ThreeDRoom.findById(req.params.id);
+    if (!room) return res.status(404).json({ message: '3D Room not found' });
 
     const star = await Star.findOne({ _id: room.starId, userId: req.user.userId });
     if (!star) return res.status(403).json({ message: 'Forbidden' });
@@ -100,23 +92,21 @@ router.put('/detail/:id', verifyToken, async (req, res) => {
 
     res.json(room);
   } catch (err) {
-    res.status(400).json({ message: 'Could not update VR room', error: err.message });
+    res.status(400).json({ message: 'Could not update 3D room', error: err.message });
   }
 });
 
-/**
- * DELETE – VR-Room verwijderen
- */
+/** DELETE – 3D-room verwijderen */
 router.delete('/detail/:id', verifyToken, async (req, res) => {
   try {
-    const room = await VRRoom.findById(req.params.id);
-    if (!room) return res.status(404).json({ message: 'VR Room not found' });
+    const room = await ThreeDRoom.findById(req.params.id);
+    if (!room) return res.status(404).json({ message: '3D Room not found' });
 
     const star = await Star.findOne({ _id: room.starId, userId: req.user.userId });
     if (!star) return res.status(403).json({ message: 'Forbidden' });
 
     await room.deleteOne();
-    res.json({ message: 'VR Room deleted' });
+    res.json({ message: '3D Room deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
