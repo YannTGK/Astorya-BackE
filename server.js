@@ -7,7 +7,7 @@ import dotenv   from 'dotenv';
 import authRoutes        from './routes/v2/auth.js';
 import userRoutes        from './routes/v2/user.js';
 import starRoutes        from './routes/v2/stars.js';
-import threeDRoomRoutes  from './routes/v2/ThreeDRoom.js';   // ⬅️ let op de map!
+import threeDRoomRoutes  from "./routes/v2/ThreeDRoom.js" // ⬅️ let op de map!
 import photoAlbumsRoutes from './routes/v2/photoAlbums.js';
 import photosRoutes      from './routes/v2/photos.js';
 import videoAlbumsRoutes from './routes/v2/videoAlbums.js';
