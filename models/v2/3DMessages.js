@@ -14,4 +14,4 @@ const messageSchema = new mongoose.Schema({
 // compound index for fast room lookup
 messageSchema.index({ starId: 1, roomId: 1 });
 
-export default mongoose.model('Message', messageSchema);
+export default mongoose.model('ThreeDRoomMessage', messageSchema);

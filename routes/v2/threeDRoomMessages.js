@@ -2,7 +2,7 @@
 import express     from "express";
 import Star        from "../../models/v2/Star.js";
 import ThreeDRoom  from "../../models/v2/ThreeDRoom.js";
-import Message     from "../../models/v2/3DMessages.js";         // your Message model
+import ThreeDRoomMessage    from "../../models/v2/3DMessages.js";         // your Message model
 import verifyToken from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router({ mergeParams: true });
@@ -19,7 +19,7 @@ router.post("/", verifyToken, async (req, res) => {
     return res.status(404).json({ message: "Star or Room not found" });
 
   // 2) create, now *including* starId
-  const msg = await Message.create({
+  const msg = await ThreeDRoomMessage.create({
     starId,
     roomId,
     message,
@@ -42,14 +42,14 @@ router.get("/", verifyToken, async (req, res) => {
     return res.status(404).json({ message: "Not found or forbidden" });
 
   // fetch just this room’s messages
-  const msgs = await Message.find({ starId, roomId }).sort({ addedAt: -1 });
+  const msgs = ThreeDRoomMessage.find({ starId, roomId }).sort({ addedAt: -1 });
   res.json(msgs);
 });
 
 /** GET  /stars/:starId/three-d-rooms/:roomId/messages/:msgId */
 router.get("/:msgId", verifyToken, async (req, res) => {
   const { starId, roomId, msgId } = req.params;
-  const msg = await Message.findById(msgId);
+  const msg = await ThreeDRoomMessage.findById(msgId);
   if (!msg) return res.status(404).json({ message: "Message not found" });
 
   // ensure it really belongs to this star+room
@@ -72,7 +72,7 @@ router.get("/:msgId", verifyToken, async (req, res) => {
 /** DELETE  /stars/:starId/three-d-rooms/:roomId/messages/:msgId */
 router.delete("/:msgId", verifyToken, async (req, res) => {
   const { starId, roomId, msgId } = req.params;
-  const msg = await Message.findById(msgId);
+  const msg = await ThreeDRoomMessage.findById(msgId);
   if (!msg) return res.status(404).json({ message: "Message not found" });
 
   // same star+room check
