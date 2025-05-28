@@ -32,6 +32,39 @@ router.post("/", verifyToken, async (req, res) => {
   res.status(201).json(msg);
 });
 
+/** PATCH  /stars/:starId/three-d-rooms/:roomId/messages/:msgId */
+router.patch("/:msgId", verifyToken, async (req, res) => {
+  const { starId, roomId, msgId } = req.params;
+  const { message, canView = [], canEdit = [] } = req.body;
+
+  // find and check exists
+  const msg = await ThreeDRoomMessage.findById(msgId);
+  if (!msg)
+    return res.status(404).json({ message: "Message not found" });
+
+  // ensure star+room match
+  if (
+    msg.starId.toString() !== starId ||
+    msg.roomId.toString() !== roomId
+  ) {
+    return res.status(404).json({ message: "Message not found in this room" });
+  }
+
+  // only sender or star owner can edit
+  const isSender = msg.sender.toString() === req.user.userId;
+  const isStarOwner = await Star.exists({ _id: starId, userId: req.user.userId });
+  if (!isSender && !isStarOwner)
+    return res.status(403).json({ message: "Forbidden" });
+
+  // update fields
+  msg.message = message;
+  msg.canView = canView;
+  msg.canEdit = canEdit;
+  await msg.save();
+
+  res.json(msg);
+});
+
 /** GET  /stars/:starId/three-d-rooms/:roomId/messages */
 router.get("/", verifyToken, async (req, res) => {
   const { starId, roomId } = req.params;
