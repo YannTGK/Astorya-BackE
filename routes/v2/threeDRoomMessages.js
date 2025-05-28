@@ -1,67 +1,93 @@
-import express from "express";
-import Star from "../../models/v2/Star.js";
-import ThreeDRoom from "../../models/v2/ThreeDRoom.js";
-import ThreeDRoomMessage from "../../models/v2/Messages.js";
+// routes/v2/threeDRoomMessages.js
+import express     from "express";
+import Star        from "../../models/v2/Star.js";
+import ThreeDRoom  from "../../models/v2/ThreeDRoom.js";
+import Message     from "../../models/v2/3DMessages.js";         // your Message model
 import verifyToken from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router({ mergeParams: true });
 
-// POST create message
+/** POST  /stars/:starId/three-d-rooms/:roomId/messages */
 router.post("/", verifyToken, async (req, res) => {
   const { starId, roomId } = req.params;
   const { message, canView = [], canEdit = [] } = req.body;
 
+  // 1) owner check
   const star = await Star.findOne({ _id: starId, userId: req.user.userId });
   const room = await ThreeDRoom.findOne({ _id: roomId, starId });
-  if (!star || !room) return res.status(404).json({ message: "Not found or forbidden" });
+  if (!star || !room)
+    return res.status(404).json({ message: "Star or Room not found" });
 
-  const msg = await ThreeDRoomMessage.create({
+  // 2) create, now *including* starId
+  const msg = await Message.create({
+    starId,
     roomId,
     message,
-    sender: req.user.userId,
+    sender:  req.user.userId,
     canView,
     canEdit,
   });
+
   res.status(201).json(msg);
 });
 
-// GET all messages
+/** GET  /stars/:starId/three-d-rooms/:roomId/messages */
 router.get("/", verifyToken, async (req, res) => {
   const { starId, roomId } = req.params;
+
+  // same ownership check
   const star = await Star.findOne({ _id: starId, userId: req.user.userId });
   const room = await ThreeDRoom.findOne({ _id: roomId, starId });
-  if (!star || !room) return res.status(404).json({ message: "Not found or forbidden" });
+  if (!star || !room)
+    return res.status(404).json({ message: "Not found or forbidden" });
 
-  const msgs = await ThreeDRoomMessage.find({ roomId });
+  // fetch just this room’s messages
+  const msgs = await Message.find({ starId, roomId }).sort({ addedAt: -1 });
   res.json(msgs);
 });
 
-// GET detail
+/** GET  /stars/:starId/three-d-rooms/:roomId/messages/:msgId */
 router.get("/:msgId", verifyToken, async (req, res) => {
-  const { starId, msgId } = req.params;
-  const msg = await ThreeDRoomMessage.findById(msgId);
+  const { starId, roomId, msgId } = req.params;
+  const msg = await Message.findById(msgId);
   if (!msg) return res.status(404).json({ message: "Message not found" });
 
-  const star = await Star.findOne({ _id: starId, userId: req.user.userId });
-  const room = await ThreeDRoom.findById(msg.roomId);
-  if (!star || !room) return res.status(403).json({ message: "Forbidden" });
+  // ensure it really belongs to this star+room
+  if (
+    msg.starId.toString() !== starId ||
+    msg.roomId.toString() !== roomId
+  ) {
+    return res.status(404).json({ message: "Message not found in this room" });
+  }
 
-  // alleen owner of in canView
+  // permission: owner or in canView
   const isOwner = msg.sender.toString() === req.user.userId;
   const canSee  = msg.canView.map(String).includes(req.user.userId);
-  if (!isOwner && !canSee) return res.status(403).json({ message: "Forbidden" });
+  if (!isOwner && !canSee)
+    return res.status(403).json({ message: "Forbidden" });
 
   res.json(msg);
 });
 
-// DELETE
+/** DELETE  /stars/:starId/three-d-rooms/:roomId/messages/:msgId */
 router.delete("/:msgId", verifyToken, async (req, res) => {
-  const { starId, msgId } = req.params;
-  const msg = await ThreeDRoomMessage.findById(msgId);
+  const { starId, roomId, msgId } = req.params;
+  const msg = await Message.findById(msgId);
   if (!msg) return res.status(404).json({ message: "Message not found" });
 
-  const star = await Star.findOne({ _id: starId, userId: req.user.userId });
-  if (!star) return res.status(403).json({ message: "Forbidden" });
+  // same star+room check
+  if (
+    msg.starId.toString() !== starId ||
+    msg.roomId.toString() !== roomId
+  ) {
+    return res.status(404).json({ message: "Message not found in this room" });
+  }
+
+  // only the sender or star owner can delete
+  const isOwner    = msg.sender.toString() === req.user.userId;
+  const isStarOwner = await Star.exists({ _id: starId, userId: req.user.userId });
+  if (!isOwner && !isStarOwner)
+    return res.status(403).json({ message: "Forbidden" });
 
   await msg.deleteOne();
   res.json({ message: "Deleted" });
