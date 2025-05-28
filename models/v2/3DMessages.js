@@ -1,4 +1,4 @@
-// models/v2/Message.js
+// models/v2/3DMessage.js
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
