@@ -92,7 +92,7 @@ router.post(
 
 // ───────── DELETE /detail/:id (video delete, private only) ─────────
 router.delete(
-  '/detail/:id',
+  '/:id',
   verifyToken,
   async (req, res) => {
     try {

@@ -118,7 +118,7 @@ router.post(
  * Requires authentication and ownership
  */
 router.delete(
-  '/detail/:id',
+  '/:id',
   verifyToken,
   async (req, res) => {
     try {
