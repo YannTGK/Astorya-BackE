@@ -7,6 +7,20 @@ import verifyToken from "../../middleware/v1/authMiddleware.js";
 
 const router = express.Router({ mergeParams: true });
 
+router.get("/", async (req, res, next) => {
+  const { starId, roomId } = req.params;
+  const star = await Star.findById(starId);
+  if (!star) return res.status(404).json({ message: "Star not found" });
+  if (!star.isPrivate) {
+    // public star → return all messages (you probably want to filter by canView?)
+    const msgs = await ThreeDRoomMessage.find({ starId, roomId })
+      .sort({ addedAt: -1 });
+    return res.json(msgs);
+  }
+  next();
+});
+
+
 /** POST  /stars/:starId/three-d-rooms/:roomId/messages */
 router.post("/", verifyToken, async (req, res) => {
   const { starId, roomId } = req.params;
