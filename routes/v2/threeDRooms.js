@@ -8,21 +8,43 @@ const router = express.Router({ mergeParams: true });
 
 /* ────────────────────── Genest (/api/v2/stars/:starId/three-d-rooms) ────────────────────── */
 
-/** GET – alle 3D-rooms van een ster (alleen eigenaar) */
-router.get('/', verifyToken, async (req, res) => {
-  const { starId } = req.params;
-  if (!starId) return res.status(400).json({ message: 'Missing starId in route' });
+/**
+ * GET /stars/:starId/three-d-rooms
+ *  - if star.isPrivate == false ⇒ public: return all rooms, no auth required
+ *  - else ⇒ require verifyToken and owner-only
+ */
+router.get(
+  '/',
+  // first: unauthenticated handler for public stars
+  async (req, res, next) => {
+    const { starId } = req.params;
+    if (!starId) return res.status(400).json({ message: 'Missing starId' });
 
-  const star = await Star.findOne({ _id: starId, userId: req.user.userId });
-  if (!star) return res.status(404).json({ message: 'Star not found or forbidden' });
+    const star = await Star.findById(starId);
+    if (!star) return res.status(404).json({ message: 'Star not found' });
 
-  try {
+    if (!star.isPrivate) {
+      // public star → return rooms for everyone
+      const rooms = await ThreeDRoom.find({ starId });
+      return res.json(rooms);
+    }
+
+    // otherwise, it’s private → go to next (owner‐only) handler
+    next();
+  },
+  // owner‐only handler
+  verifyToken,
+  async (req, res) => {
+    const { starId } = req.params;
+    // now we know star.isPrivate === true
+    const star = await Star.findOne({ _id: starId, userId: req.user.userId });
+    if (!star) {
+      return res.status(404).json({ message: 'Star not found or forbidden' });
+    }
     const rooms = await ThreeDRoom.find({ starId });
-    res.json(rooms);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    return res.json(rooms);
   }
-});
+);
 
 /** POST – nieuwe 3D-room aanmaken */
 router.post('/', verifyToken, async (req, res) => {
