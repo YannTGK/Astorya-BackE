@@ -1,22 +1,41 @@
+// routes/v2/messages.js
 import express from 'express';
 import Message from '../../models/v2/Messages.js';
-import Star from '../../models/v2/Star.js';
+import Star    from '../../models/v2/Star.js';
 import verifyToken from '../../middleware/v1/authMiddleware.js';
 
 const router = express.Router({ mergeParams: true });
 
 /**
- * POST /stars/:starId/messages
- * Maak een nieuwe message aan, zet sender op de ingelogde gebruiker
- * body: { message: string, canView?: ObjectId[], canEdit?: ObjectId[] }
+ * Helper: load a Star and check view/edit rights.
+ * @param {string} starId
+ * @param {string} userId
+ * @param {boolean} requireEdit  if true, requires edit rights; else view suffices
+ * @returns {Star|null}
+ */
+async function loadStarWithAccess(starId, userId, requireEdit = false) {
+  const star = await Star.findById(starId);
+  if (!star) return null;
+  const isOwner    = String(star.userId) === userId;
+  const canViewStar = Array.isArray(star.canView) && star.canView.map(String).includes(userId);
+  const canEditStar = Array.isArray(star.canEdit) && star.canEdit.map(String).includes(userId);
+  if (requireEdit) {
+    if (!isOwner && !canEditStar) return null;
+  } else {
+    if (!isOwner && !canViewStar && !canEditStar) return null;
+  }
+  return star;
+}
+
+/* POST /stars/:starId/messages
+ * Create a new message if user has edit rights on the star.
  */
 router.post('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
   const { message, canView = [], canEdit = [] } = req.body;
 
   try {
-    // Controle eigenaar van de star
-    const star = await Star.findOne({ _id: starId, userId: req.user.userId });
+    const star = await loadStarWithAccess(starId, req.user.userId, true);
     if (!star) {
       return res.status(404).json({ message: 'Star not found or forbidden' });
     }
@@ -28,21 +47,20 @@ router.post('/', verifyToken, async (req, res) => {
       canView,
       canEdit,
     });
-
     res.status(201).json(newMessage);
   } catch (err) {
     res.status(500).json({ message: 'Failed to create message', error: err.message });
   }
 });
 
-/**
- * GET /stars/:starId/messages
- * Haal alle messages op bij een star
+/* GET /stars/:starId/messages
+ * List all messages if user has view rights on the star.
  */
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
+
   try {
-    const star = await Star.findOne({ _id: starId, userId: req.user.userId });
+    const star = await loadStarWithAccess(starId, req.user.userId, false);
     if (!star) {
       return res.status(404).json({ message: 'Star not found or forbidden' });
     }
@@ -54,79 +72,82 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-/**
- * GET /stars/:starId/messages/:messageId
- * Haal één message op, controleer owner of view-rechten
+/* GET /stars/:starId/messages/:messageId
+ * Fetch one message if user has view rights on the star or on that message.
  */
 router.get('/:messageId', verifyToken, async (req, res) => {
   const { starId, messageId } = req.params;
 
   try {
-    const message = await Message.findById(messageId);
-    if (!message || message.starId.toString() !== starId) {
+    const msg = await Message.findById(messageId);
+    if (!msg || msg.starId.toString() !== starId) {
       return res.status(404).json({ message: 'Message not found' });
     }
-    // alleen owner of iemand in canView mag lezen
-    if (
-      message.sender.toString() !== req.user.userId &&
-      !message.canView.map(id => id.toString()).includes(req.user.userId)
-    ) {
+    // star-level view?
+    const star = await loadStarWithAccess(starId, req.user.userId, false);
+    // message-level view?
+    const isSender   = msg.sender.toString() === req.user.userId;
+    const canViewMsg = Array.isArray(msg.canView) && msg.canView.map(String).includes(req.user.userId);
+    if (!star && !isSender && !canViewMsg) {
       return res.status(403).json({ message: 'Forbidden' });
     }
-    res.json(message);
+    res.json(msg);
   } catch (err) {
     res.status(500).json({ message: 'Failed to retrieve message', error: err.message });
   }
 });
 
-/**
- * PUT /stars/:starId/messages/:messageId
- * Wijzig content en view/edit-rechten
+/* PUT /stars/:starId/messages/:messageId
+ * Update a message if user has edit rights on the star or on that message.
  */
 router.put('/:messageId', verifyToken, async (req, res) => {
   const { starId, messageId } = req.params;
   const { message: newText, canView, canEdit } = req.body;
 
   try {
-    const existing = await Message.findById(messageId);
-    if (!existing || existing.starId.toString() !== starId) {
+    const msg = await Message.findById(messageId);
+    if (!msg || msg.starId.toString() !== starId) {
       return res.status(404).json({ message: 'Message not found' });
     }
-    // alleen owner of iemand met edit-recht
-    const isOwner = existing.sender.toString() === req.user.userId;
-    const hasEdit = existing.canEdit.map(id => id.toString()).includes(req.user.userId);
-    if (!isOwner && !hasEdit) {
+    // star-level edit?
+    const star = await loadStarWithAccess(starId, req.user.userId, true);
+    // message-level edit?
+    const isSender  = msg.sender.toString() === req.user.userId;
+    const canEditMsg = Array.isArray(msg.canEdit) && msg.canEdit.map(String).includes(req.user.userId);
+    if (!star && !isSender && !canEditMsg) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    if (newText) existing.message = newText;
-    if (Array.isArray(canView)) existing.canView = canView;
-    if (Array.isArray(canEdit)) existing.canEdit = canEdit;
+    if (newText   !== undefined) msg.message = newText;
+    if (Array.isArray(canView))  msg.canView  = canView;
+    if (Array.isArray(canEdit))  msg.canEdit  = canEdit;
+    msg.updatedAt = new Date();
 
-    await existing.save();
-    res.json({ message: 'Message updated', updatedMessage: existing });
+    await msg.save();
+    res.json({ message: 'Message updated', updatedMessage: msg });
   } catch (err) {
     res.status(500).json({ message: 'Failed to update message', error: err.message });
   }
 });
 
-/**
- * DELETE /stars/:starId/messages/:messageId
- * Verwijder een message (alleen owner)
+/* DELETE /stars/:starId/messages/:messageId
+ * Delete a message only by its sender or by someone with edit rights on the star.
  */
 router.delete('/:messageId', verifyToken, async (req, res) => {
   const { starId, messageId } = req.params;
 
   try {
-    const existing = await Message.findById(messageId);
-    if (!existing || existing.starId.toString() !== starId) {
+    const msg = await Message.findById(messageId);
+    if (!msg || msg.starId.toString() !== starId) {
       return res.status(404).json({ message: 'Message not found' });
     }
-    if (existing.sender.toString() !== req.user.userId) {
+    const star = await loadStarWithAccess(starId, req.user.userId, true);
+    const isSender = msg.sender.toString() === req.user.userId;
+    if (!star && !isSender) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    await existing.deleteOne();
+    await msg.deleteOne();
     res.json({ message: 'Message deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Failed to delete message', error: err.message });
