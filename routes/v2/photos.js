@@ -4,7 +4,7 @@ import multer   from 'multer';
 import fs       from 'fs/promises';
 import sharp    from 'sharp';
 
-import wasabi   from '../../utils/wasabiClient.js';
+import wasabi     from '../../utils/wasabiClient.js';
 import { presign } from '../../utils/presign.js';
 
 import Photo      from '../../models/v2/Photo.js';
@@ -15,27 +15,31 @@ import verifyToken from '../../middleware/v1/authMiddleware.js';
 const router = express.Router({ mergeParams: true });
 const upload = multer({ dest: 'uploads/temp/' });
 
-/** Helper: load a Star if user is owner or in its canView/canEdit */
-async function loadAccessibleStar(starId, userId) {
-  return Star.findOne({
-    _id: starId,
-    $or: [
-      { userId: userId },    // owner
-      { canView: userId },   // shared for view
-      { canEdit: userId },   // shared for edit
-    ]
-  });
-}
+/**
+ * Helper to load an album and its star, and check view/edit rights.
+ * @param {string} albumId
+ * @param {string} userId
+ * @param {boolean} requireEdit  if true, requires edit rights; otherwise view rights suffice
+ * @returns {{ album: PhotoAlbum, star: Star }|null}
+ */
+async function loadAlbumWithAccess(albumId, userId, requireEdit = false) {
+  const album = await PhotoAlbum.findById(albumId);
+  if (!album) return null;
 
-/** Helper: load a Star for edit actions (owner or canEdit) */
-async function loadEditableStar(starId, userId) {
-  return Star.findOne({
-    _id: starId,
-    $or: [
-      { userId: userId },
-      { canEdit: userId },
-    ]
-  });
+  const star = await Star.findById(album.starId);
+  if (!star) return null;
+
+  const isOwner  = String(star.userId) === userId;
+  const canEdit  = album.canEdit?.map(String).includes(userId);
+  const canView  = album.canView?.map(String).includes(userId) || canEdit;
+
+  if (requireEdit) {
+    if (!isOwner && !canEdit) return null;
+  } else {
+    if (!isOwner && !canView) return null;
+  }
+
+  return { album, star };
 }
 
 async function compressImage(inPath, outPath) {
@@ -66,20 +70,21 @@ async function uploadToWasabi(localPath, key) {
 }
 
 
-/** ─── POST /upload ─── upload into an album (owner or canEdit) */
+/** ─── POST /upload ─── upload into an album (owner or album-editor) */
 router.post(
   '/upload',
   verifyToken,
   upload.single('photo'),
   async (req, res) => {
     const { starId, albumId } = req.params;
+
     try {
-      const star  = await loadEditableStar(starId, req.user.userId);
-      const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-      if (!star || !album) {
-        return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+      const access = await loadAlbumWithAccess(albumId, req.user.userId, true);
+      if (!access || String(access.album.starId) !== starId) {
+        return res.status(404).json({ message: 'Album not found or access forbidden' });
       }
 
+      // compress + upload
       const tmpIn  = req.file.path;
       const tmpOut = `${tmpIn}-compressed.jpg`;
       await compressImage(tmpIn, tmpOut);
@@ -101,14 +106,13 @@ router.post(
 );
 
 
-/** ─── GET / ─── list photos (owner, canView or canEdit) */
+/** ─── GET / ─── list photos (owner or album-viewer/editor) */
 router.get('/', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   try {
-    const star  = await loadAccessibleStar(starId, req.user.userId);
-    const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-    if (!star || !album) {
-      return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+    const access = await loadAlbumWithAccess(albumId, req.user.userId);
+    if (!access || String(access.album.starId) !== starId) {
+      return res.status(404).json({ message: 'Album not found or access forbidden' });
     }
 
     const photos = await Photo.find({ photoAlbumId: albumId });
@@ -125,7 +129,7 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 
-/** ─── GET /detail/:id ─── get one photo (owner, canView or canEdit) */
+/** ─── GET /detail/:id ─── get one photo (owner or album-viewer/editor) */
 router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.id);
@@ -133,9 +137,8 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ message: 'Photo not found' });
     }
 
-    const star = await loadAccessibleStar(photo.photoAlbumId, req.user.userId)
-      .then(s => Star.findOne({ _id: s._id })); // load star by album
-    if (!star) {
+    const access = await loadAlbumWithAccess(photo.photoAlbumId, req.user.userId);
+    if (!access) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
@@ -150,7 +153,7 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
 });
 
 
-/** ─── DELETE /detail/:id ─── remove one photo (owner or canEdit) */
+/** ─── DELETE /detail/:id ─── remove one photo (owner or album-editor) */
 router.delete('/detail/:id', verifyToken, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.id);
@@ -158,12 +161,12 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ message: 'Photo not found' });
     }
 
-    const star = await loadEditableStar(photo.photoAlbumId, req.user.userId)
-      .then(s => Star.findOne({ _id: s._id })); // load star by album
-    if (!star) {
+    const access = await loadAlbumWithAccess(photo.photoAlbumId, req.user.userId, true);
+    if (!access) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
+    // delete from Wasabi if unique
     const duplicates = await Photo.countDocuments({ key: photo.key });
     if (duplicates === 1) {
       try {
@@ -184,16 +187,15 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
 });
 
 
-/** ─── POST /copy ─── copy selected photos into this album (owner or canEdit) */
+/** ─── POST /copy ─── copy selected photos into this album (owner or album-editor) */
 router.post('/copy', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   const { photoIds = [] }   = req.body;
 
   try {
-    const star  = await loadEditableStar(starId, req.user.userId);
-    const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-    if (!star || !album) {
-      return res.status(404).json({ message: 'Forbidden' });
+    const access = await loadAlbumWithAccess(albumId, req.user.userId, true);
+    if (!access) {
+      return res.status(404).json({ message: 'Album not found or access forbidden' });
     }
 
     const photos = await Photo.find({ _id: { $in: photoIds } });
@@ -211,7 +213,7 @@ router.post('/copy', verifyToken, async (req, res) => {
 });
 
 
-/** ─── POST /move ─── move selected photos into this album (owner or canEdit) */
+/** ─── POST /move ─── move selected photos into this album (owner or album-editor) */
 router.post('/move', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   const { photoIds }        = req.body;
@@ -221,10 +223,9 @@ router.post('/move', verifyToken, async (req, res) => {
   }
 
   try {
-    const star  = await loadEditableStar(starId, req.user.userId);
-    const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-    if (!star || !album) {
-      return res.status(404).json({ message: 'Forbidden' });
+    const access = await loadAlbumWithAccess(albumId, req.user.userId, true);
+    if (!access) {
+      return res.status(404).json({ message: 'Album not found or access forbidden' });
     }
 
     let moved = 0;
@@ -235,7 +236,11 @@ router.post('/move', verifyToken, async (req, res) => {
       const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
       if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
 
-      await Photo.create({ photoAlbumId: albumId, key: src.key, addedAt: new Date() });
+      await Photo.create({
+        photoAlbumId: albumId,
+        key:          src.key,
+        addedAt:      new Date(),
+      });
       await src.deleteOne();
       moved++;
     }
