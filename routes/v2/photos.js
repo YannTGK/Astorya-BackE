@@ -16,7 +16,8 @@ const router = express.Router({ mergeParams: true });
 const upload = multer({ dest: 'uploads/temp/' });
 
 /**
- * Helper to load an album and its star, and check view/edit rights.
+ * Helper to load an album and its star, and check view/edit rights
+ * at both the star level and the album level.
  * @param {string} albumId
  * @param {string} userId
  * @param {boolean} requireEdit  if true, requires edit rights; otherwise view rights suffice
@@ -29,14 +30,20 @@ async function loadAlbumWithAccess(albumId, userId, requireEdit = false) {
   const star = await Star.findById(album.starId);
   if (!star) return null;
 
-  const isOwner  = String(star.userId) === userId;
-  const canEdit  = album.canEdit?.map(String).includes(userId);
-  const canView  = album.canView?.map(String).includes(userId) || canEdit;
+  const isOwner     = String(star.userId) === userId;
+  const starCanView = Array.isArray(star.canView) && star.canView.map(String).includes(userId);
+  const starCanEdit = Array.isArray(star.canEdit) && star.canEdit.map(String).includes(userId);
+  const albumCanView = Array.isArray(album.canView) && album.canView.map(String).includes(userId);
+  const albumCanEdit = Array.isArray(album.canEdit) && album.canEdit.map(String).includes(userId);
 
   if (requireEdit) {
-    if (!isOwner && !canEdit) return null;
+    if (!isOwner && !starCanEdit && !albumCanEdit) {
+      return null;
+    }
   } else {
-    if (!isOwner && !canView) return null;
+    if (!isOwner && !starCanView && !starCanEdit && !albumCanView && !albumCanEdit) {
+      return null;
+    }
   }
 
   return { album, star };
@@ -70,21 +77,19 @@ async function uploadToWasabi(localPath, key) {
 }
 
 
-/** ─── POST /upload ─── upload into an album (owner or album-editor) */
+/** ─── POST /upload ─── upload into an album (owner or album-editor/star-editor) */
 router.post(
   '/upload',
   verifyToken,
   upload.single('photo'),
   async (req, res) => {
     const { starId, albumId } = req.params;
-
     try {
       const access = await loadAlbumWithAccess(albumId, req.user.userId, true);
       if (!access || String(access.album.starId) !== starId) {
         return res.status(404).json({ message: 'Album not found or access forbidden' });
       }
 
-      // compress + upload
       const tmpIn  = req.file.path;
       const tmpOut = `${tmpIn}-compressed.jpg`;
       await compressImage(tmpIn, tmpOut);
@@ -106,11 +111,11 @@ router.post(
 );
 
 
-/** ─── GET / ─── list photos (owner or album-viewer/editor) */
+/** ─── GET / ─── list photos (owner, star-viewer/editor, or album-viewer/editor) */
 router.get('/', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   try {
-    const access = await loadAlbumWithAccess(albumId, req.user.userId);
+    const access = await loadAlbumWithAccess(albumId, req.user.userId, false);
     if (!access || String(access.album.starId) !== starId) {
       return res.status(404).json({ message: 'Album not found or access forbidden' });
     }
@@ -124,12 +129,13 @@ router.get('/', verifyToken, async (req, res) => {
     );
     res.json(out);
   } catch (err) {
+    console.error('List photos error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
 
-/** ─── GET /detail/:id ─── get one photo (owner or album-viewer/editor) */
+/** ─── GET /detail/:id ─── get one photo (same access rules) */
 router.get('/detail/:id', verifyToken, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.id);
@@ -137,23 +143,24 @@ router.get('/detail/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ message: 'Photo not found' });
     }
 
-    const access = await loadAlbumWithAccess(photo.photoAlbumId, req.user.userId);
+    const access = await loadAlbumWithAccess(photo.photoAlbumId, req.user.userId, false);
     if (!access) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
     res.json({
-      _id: photo._id,
-      url: await presign(photo.key, 36000),
+      _id:     photo._id,
+      url:     await presign(photo.key, 36000),
       addedAt: photo.addedAt,
     });
   } catch (err) {
+    console.error('Get photo detail error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
 
-/** ─── DELETE /detail/:id ─── remove one photo (owner or album-editor) */
+/** ─── DELETE /detail/:id ─── remove one photo (owner, star-editor, or album-editor) */
 router.delete('/detail/:id', verifyToken, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.id);
@@ -166,7 +173,6 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    // delete from Wasabi if unique
     const duplicates = await Photo.countDocuments({ key: photo.key });
     if (duplicates === 1) {
       try {
@@ -182,16 +188,16 @@ router.delete('/detail/:id', verifyToken, async (req, res) => {
     await photo.deleteOne();
     res.json({ message: 'Photo deleted' });
   } catch (err) {
+    console.error('Delete photo error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
 
-/** ─── POST /copy ─── copy selected photos into this album (owner or album-editor) */
+/** ─── POST /copy ─── copy selected photos (owner, star-editor, or album-editor) */
 router.post('/copy', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   const { photoIds = [] }   = req.body;
-
   try {
     const access = await loadAlbumWithAccess(albumId, req.user.userId, true);
     if (!access) {
@@ -207,17 +213,16 @@ router.post('/copy', verifyToken, async (req, res) => {
 
     res.json({ message: 'Copied', added: photos.length });
   } catch (err) {
-    console.error('copy error:', err);
+    console.error('Copy photos error:', err);
     res.status(500).json({ message: 'Copy failed', error: err.message });
   }
 });
 
 
-/** ─── POST /move ─── move selected photos into this album (owner or album-editor) */
+/** ─── POST /move ─── move selected photos (owner, star-editor, or album-editor) */
 router.post('/move', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   const { photoIds }        = req.body;
-
   if (!Array.isArray(photoIds) || photoIds.length === 0) {
     return res.status(400).json({ message: 'photoIds (array) required' });
   }
@@ -232,7 +237,6 @@ router.post('/move', verifyToken, async (req, res) => {
     for (const pid of photoIds) {
       const src = await Photo.findById(pid);
       if (!src) continue;
-
       const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
       if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
 
@@ -247,7 +251,7 @@ router.post('/move', verifyToken, async (req, res) => {
 
     res.json({ success: true, movedCount: moved });
   } catch (err) {
-    console.error('move error:', err);
+    console.error('Move photos error:', err);
     res.status(500).json({ message: 'Move failed', error: err.message });
   }
 });
