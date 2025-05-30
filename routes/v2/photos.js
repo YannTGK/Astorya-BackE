@@ -15,12 +15,32 @@ import verifyToken from '../../middleware/v1/authMiddleware.js';
 const router = express.Router({ mergeParams: true });
 const upload = multer({ dest: 'uploads/temp/' });
 
-/* ───────── helper-functies ───────── */
+/** Helper: load a Star if user is owner or in its canView/canEdit */
+async function loadAccessibleStar(starId, userId) {
+  return Star.findOne({
+    _id: starId,
+    $or: [
+      { userId: userId },    // owner
+      { canView: userId },   // shared for view
+      { canEdit: userId },   // shared for edit
+    ]
+  });
+}
+
+/** Helper: load a Star for edit actions (owner or canEdit) */
+async function loadEditableStar(starId, userId) {
+  return Star.findOne({
+    _id: starId,
+    $or: [
+      { userId: userId },
+      { canEdit: userId },
+    ]
+  });
+}
+
 async function compressImage(inPath, outPath) {
-  /*  rotate()  ➜ leest EXIF-orientation en draait de pixels,
-      daarna resize + quality 80 % JPEG  */
   await sharp(inPath)
-    .rotate()                 // ← FIX: auto-orient
+    .rotate()
     .resize({ width: 1600 })
     .jpeg({ quality: 80 })
     .toFile(outPath);
@@ -37,17 +57,16 @@ async function duplicateInWasabi(srcKey, dstKey) {
 
 async function uploadToWasabi(localPath, key) {
   const buffer = await fs.readFile(localPath);
-  await wasabi
-    .upload({
-      Bucket: process.env.WASABI_BUCKET_NAME,
-      Key:    key,
-      Body:   buffer,
-      ContentType: 'image/jpeg',    // geen ACL → object blijft privé
-    })
-    .promise();
+  await wasabi.upload({
+    Bucket: process.env.WASABI_BUCKET_NAME,
+    Key:    key,
+    Body:   buffer,
+    ContentType: 'image/jpeg',
+  }).promise();
 }
 
-/* ───────── POST  /upload ───────── */
+
+/** ─── POST /upload ─── upload into an album (owner or canEdit) */
 router.post(
   '/upload',
   verifyToken,
@@ -55,13 +74,12 @@ router.post(
   async (req, res) => {
     const { starId, albumId } = req.params;
     try {
-      /* permissie-check */
-      const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+      const star  = await loadEditableStar(starId, req.user.userId);
       const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-      if (!star || !album)
+      if (!star || !album) {
         return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+      }
 
-      /* compressie & upload */
       const tmpIn  = req.file.path;
       const tmpOut = `${tmpIn}-compressed.jpg`;
       await compressImage(tmpIn, tmpOut);
@@ -69,7 +87,6 @@ router.post(
       const key = `stars/${starId}/albums/${albumId}/${Date.now()}.jpg`;
       await uploadToWasabi(tmpOut, key);
 
-      /* DB-record */
       const photo = await Photo.create({ photoAlbumId: albumId, key });
 
       await fs.unlink(tmpIn).catch(() => {});
@@ -83,18 +100,18 @@ router.post(
   }
 );
 
-/* ───────── GET /  – lijst foto’s ───────── */
+
+/** ─── GET / ─── list photos (owner, canView or canEdit) */
 router.get('/', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   try {
-    const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+    const star  = await loadAccessibleStar(starId, req.user.userId);
     const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-    if (!star || !album)
+    if (!star || !album) {
       return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+    }
 
     const photos = await Photo.find({ photoAlbumId: albumId });
-
-    /* presigned download-urls (1 u geldig) */
     const out = await Promise.all(
       photos.map(async p => ({
         _id: p._id,
@@ -107,71 +124,82 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-/* ───────── GET & DELETE /detail/:id ───────── */
+
+/** ─── GET /detail/:id ─── get one photo (owner, canView or canEdit) */
 router.get('/detail/:id', verifyToken, async (req, res) => {
-  const photo = await Photo.findById(req.params.id);
-  if (!photo) return res.status(404).json({ message: 'Photo not found' });
-
-  const album = await PhotoAlbum.findById(photo.photoAlbumId);
-  const star  = await Star.findOne({ _id: album.starId, userId: req.user.userId });
-  if (!star)  return res.status(403).json({ message: 'Forbidden' });
-
-  res.json({
-    _id: photo._id,
-    url: await presign(photo.key, 36000),
-    addedAt: photo.addedAt,
-  });
-});
-
-router.delete('/detail/:id', verifyToken, async (req, res) => {
-  const photo = await Photo.findById(req.params.id);
-  if (!photo) return res.status(404).json({ message: 'Photo not found' });
-
-  const album = await PhotoAlbum.findById(photo.photoAlbumId);
-  const star  = await Star.findOne({ _id: album.starId, userId: req.user.userId });
-  if (!star)  return res.status(403).json({ message: 'Forbidden' });
-
-  /* is deze key nog ergens anders in gebruik? */
-  const duplicates = await Photo.countDocuments({ key: photo.key });
-  if (duplicates === 1) {
-    /* alleen deze foto gebruikt die key – safe to delete */
-    try {
-      await wasabi.deleteObject({
-        Bucket: process.env.WASABI_BUCKET_NAME,
-        Key: photo.key,
-      }).promise();
-    } catch (e) {
-      console.warn('S3 delete warning:', e.message);
+  try {
+    const photo = await Photo.findById(req.params.id);
+    if (!photo) {
+      return res.status(404).json({ message: 'Photo not found' });
     }
-  }
 
-  await photo.deleteOne();
-  res.json({ message: 'Photo deleted' });
+    const star = await loadAccessibleStar(photo.photoAlbumId, req.user.userId)
+      .then(s => Star.findOne({ _id: s._id })); // load star by album
+    if (!star) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    res.json({
+      _id: photo._id,
+      url: await presign(photo.key, 36000),
+      addedAt: photo.addedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
 });
 
-// POST /stars/:starId/photo-albums/:albumId/photos/copy
+
+/** ─── DELETE /detail/:id ─── remove one photo (owner or canEdit) */
+router.delete('/detail/:id', verifyToken, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.id);
+    if (!photo) {
+      return res.status(404).json({ message: 'Photo not found' });
+    }
+
+    const star = await loadEditableStar(photo.photoAlbumId, req.user.userId)
+      .then(s => Star.findOne({ _id: s._id })); // load star by album
+    if (!star) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const duplicates = await Photo.countDocuments({ key: photo.key });
+    if (duplicates === 1) {
+      try {
+        await wasabi.deleteObject({
+          Bucket: process.env.WASABI_BUCKET_NAME,
+          Key: photo.key,
+        }).promise();
+      } catch (e) {
+        console.warn('S3 delete warning:', e.message);
+      }
+    }
+
+    await photo.deleteOne();
+    res.json({ message: 'Photo deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+
+/** ─── POST /copy ─── copy selected photos into this album (owner or canEdit) */
 router.post('/copy', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
-  const { photoIds = [] }  = req.body;
+  const { photoIds = [] }   = req.body;
 
   try {
-    /* permissie-check op target-album */
-    const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
+    const star  = await loadEditableStar(starId, req.user.userId);
     const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-    if (!star || !album) return res.status(404).json({ message: 'Forbidden' });
+    if (!star || !album) {
+      return res.status(404).json({ message: 'Forbidden' });
+    }
 
-    /* bron-foto’s ophalen */
     const photos = await Photo.find({ _id: { $in: photoIds } });
-
-    /* parallel kopiëren */
-    await Promise.all(photos.map(async (p) => {
-      const newKey = `stars/${starId}/albums/${albumId}/${Date.now()}-${Math.random()
-        .toString(36).slice(2)}.jpg`;
-
-      /* ① object dupliceren in Wasabi */
+    await Promise.all(photos.map(async p => {
+      const newKey = `stars/${starId}/albums/${albumId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
       await duplicateInWasabi(p.key, newKey);
-
-      /* ② nieuw DB-record */
       await Photo.create({ photoAlbumId: albumId, key: newKey });
     }));
 
@@ -182,7 +210,8 @@ router.post('/copy', verifyToken, async (req, res) => {
   }
 });
 
-/* MOVE */
+
+/** ─── POST /move ─── move selected photos into this album (owner or canEdit) */
 router.post('/move', verifyToken, async (req, res) => {
   const { starId, albumId } = req.params;
   const { photoIds }        = req.body;
@@ -191,33 +220,31 @@ router.post('/move', verifyToken, async (req, res) => {
     return res.status(400).json({ message: 'photoIds (array) required' });
   }
 
-  const star  = await Star.findOne({ _id: starId, userId: req.user.userId });
-  const album = await PhotoAlbum.findOne({ _id: albumId, starId });
-  if (!star || !album) {
-    return res.status(404).json({ message: 'Star/Album not found or forbidden' });
+  try {
+    const star  = await loadEditableStar(starId, req.user.userId);
+    const album = await PhotoAlbum.findOne({ _id: albumId, starId });
+    if (!star || !album) {
+      return res.status(404).json({ message: 'Forbidden' });
+    }
+
+    let moved = 0;
+    for (const pid of photoIds) {
+      const src = await Photo.findById(pid);
+      if (!src) continue;
+
+      const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
+      if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
+
+      await Photo.create({ photoAlbumId: albumId, key: src.key, addedAt: new Date() });
+      await src.deleteOne();
+      moved++;
+    }
+
+    res.json({ success: true, movedCount: moved });
+  } catch (err) {
+    console.error('move error:', err);
+    res.status(500).json({ message: 'Move failed', error: err.message });
   }
-
-  let moved = 0;
-  for (const pid of photoIds) {
-    const src = await Photo.findById(pid);
-    if (!src) continue;
-
-    const srcAlbum = await PhotoAlbum.findById(src.photoAlbumId);
-    if (!srcAlbum || String(srcAlbum.starId) !== String(starId)) continue;
-
-    /* copy into destination */
-    await Photo.create({
-      photoAlbumId: albumId,
-      key:          src.key,
-      addedAt:      new Date(),
-    });
-
-    /* remove from original album */
-    await src.deleteOne();
-    moved++;
-  }
-
-  res.json({ success: true, movedCount: moved });
 });
 
 export default router;
