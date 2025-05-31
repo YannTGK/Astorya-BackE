@@ -143,18 +143,39 @@ router.post(
 
 /*═══════════════════════════════════════════════════════════════
   GET  /stars/:starId/documents
-  list all docs if star-level view
+  list all docs where user has view rights on star or doc
 ═══════════════════════════════════════════════════════════════*/
 router.get("/", verifyJWT, async (req, res) => {
   const { starId } = req.params;
+  const userId = req.user.userId;
+
   try {
-    const star = await loadStarWithView(starId, req.user.userId);
-    if (!star) {
-      return res.status(404).json({ message: "Star not found or forbidden" });
-    }
+    // Haal alle documenten op voor deze ster
     const docs = await Document.find({ starId }).sort({ addedAt: -1 });
-    res.json(docs);
+
+    // Haal de ster op voor rechtencheck
+    const star = await Star.findById(starId);
+    const isOwner     = star && String(star.userId) === userId;
+    const starCanView = star && Array.isArray(star.canView) && star.canView.map(String).includes(userId);
+    const starCanEdit = star && Array.isArray(star.canEdit) && star.canEdit.map(String).includes(userId);
+
+    // Filter documenten op basis van sterrechten of doc-rechten
+    const accessibleDocs = docs.filter(doc => {
+      const docCanView = Array.isArray(doc.canView) && doc.canView.map(String).includes(userId);
+      const docCanEdit = Array.isArray(doc.canEdit) && doc.canEdit.map(String).includes(userId);
+
+      return (
+        isOwner ||
+        starCanView ||
+        starCanEdit ||
+        docCanView ||
+        docCanEdit
+      );
+    });
+
+    res.json(accessibleDocs);
   } catch (err) {
+    console.error("[GET DOCS ERROR]", err);
     res.status(500).json({ message: "Failed to fetch documents", error: err.message });
   }
 });
