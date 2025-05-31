@@ -144,41 +144,43 @@ router.post(
 
 
 // GET /stars/:starId/audios
-// lijst alle audiobestanden waar user toegang tot heeft (via ster of audio zelf)
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
-  const userId = String(req.user.userId);
+  const userId = req.user.userId;
 
   try {
-    const audios = await Audio.find({ starId });
+    // Check star-level access
+    const star = await Star.findById(starId);
+    if (!star) return res.status(404).json({ message: 'Star not found' });
 
-    const filtered = [];
-    for (const audio of audios) {
-      const star = await Star.findById(audio.starId);
-      if (!star) continue;
+    const isStarViewer =
+      String(star.userId) === userId ||
+      (star.canView || []).includes(userId) ||
+      (star.canEdit || []).includes(userId);
 
-      const isOwner      = String(star.userId) === userId;
-      const starCanView  = (star.canView || []).map(String).includes(userId);
-      const starCanEdit  = (star.canEdit || []).map(String).includes(userId);
-      const audioCanView = (audio.canView || []).map(String).includes(userId);
-      const audioCanEdit = (audio.canEdit || []).map(String).includes(userId);
+    // Fetch all audios for this star
+    const allAudios = await Audio.find({ starId });
 
-      const canAccess = isOwner || starCanView || starCanEdit || audioCanView || audioCanEdit;
+    // Filter audios where user has access on audio OR star level
+    const filteredAudios = await Promise.all(
+      allAudios
+        .filter(a => {
+          const audioCanView = (a.canView || []).includes(userId);
+          const audioCanEdit = (a.canEdit || []).includes(userId);
+          return isStarViewer || audioCanView || audioCanEdit;
+        })
+        .map(async a => ({
+          _id:         a._id,
+          title:       a.title,
+          description: a.description,
+          url:         await presign(a.key, 3600),
+          canView:     a.canView,
+          canEdit:     a.canEdit,
+          addedAt:     a.addedAt,
+        }))
+    );
 
-      if (canAccess) {
-        filtered.push({
-          _id:         audio._id,
-          title:       audio.title,
-          description: audio.description,
-          url:         await presign(audio.key, 3600),
-          canView:     audio.canView,
-          canEdit:     audio.canEdit,
-          addedAt:     audio.addedAt,
-        });
-      }
-    }
-
-    res.json(filtered);
+    res.json(filteredAudios);
   } catch (err) {
     console.error('[AUDIO LIST ERROR]', err);
     res.status(500).json({ message: 'Server error', error: err.message });
