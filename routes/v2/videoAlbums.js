@@ -69,14 +69,42 @@ async function loadStarWithEditAccess(starId, userId) {
 // list all video albums if user has view/edit on star
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
+  const userId = req.user.userId;
+
+  if (!starId) {
+    return res.status(400).json({ message: 'Missing starId' });
+  }
+
   try {
-    if (!starId) return res.status(400).json({ message: 'Missing starId' });
+    const allAlbums = await VideoAlbum.find({ starId });
 
-    const star = await loadStarWithViewAccess(starId, req.user.userId);
-    if (!star) return res.status(404).json({ message: 'Star not found or forbidden' });
+    // Filter enkel albums waar user toegang tot heeft
+    const accessibleAlbums = allAlbums.filter(album =>
+      album.canView.includes(userId) ||
+      album.canEdit.includes(userId)
+    );
 
-    const videoAlbums = await VideoAlbum.find({ starId });
-    res.json(videoAlbums);
+    // Als er al toegankelijke albums zijn, return die gewoon
+    if (accessibleAlbums.length > 0) {
+      return res.json(accessibleAlbums);
+    }
+
+    // Anders check of de ster toegelaten is (owner / canView / canEdit)
+    const star = await Star.findOne({
+      _id: starId,
+      $or: [
+        { userId: userId },
+        { canView: userId },
+        { canEdit: userId },
+      ]
+    });
+
+    if (!star) {
+      return res.status(404).json({ message: 'Star not found or access forbidden' });
+    }
+
+    // Indien toegang via ster, toon álle albums
+    res.json(allAlbums);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
