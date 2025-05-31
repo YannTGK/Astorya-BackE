@@ -27,18 +27,34 @@ async function loadAccessibleStar(starId, userId) {
  */
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
+  const userId = req.user.userId;
+
   if (!starId) {
     return res.status(400).json({ message: 'Missing starId' });
   }
 
-  const star = await loadAccessibleStar(starId, req.user.userId);
-  if (!star) {
-    return res.status(404).json({ message: 'Star not found or access forbidden' });
-  }
-
   try {
-    const albums = await PhotoAlbum.find({ starId });
-    res.json(albums);
+    const allAlbums = await PhotoAlbum.find({ starId });
+
+    // Filter enkel albums waar user toegang tot heeft
+    const accessibleAlbums = allAlbums.filter(album =>
+      album.canView.includes(userId) ||
+      album.canEdit.includes(userId)
+    );
+
+    // Als er al toegankelijke albums zijn, return die gewoon
+    if (accessibleAlbums.length > 0) {
+      return res.json(accessibleAlbums);
+    }
+
+    // Anders check of de ster toegelaten is (owner / canView / canEdit)
+    const star = await loadAccessibleStar(starId, userId);
+    if (!star) {
+      return res.status(404).json({ message: 'Star not found or access forbidden' });
+    }
+
+    // Indien toegang via ster, toon álle albums
+    res.json(allAlbums);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
