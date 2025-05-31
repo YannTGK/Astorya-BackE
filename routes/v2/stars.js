@@ -4,6 +4,11 @@ import mongoose      from "mongoose";
 import Star          from "../../models/v2/Star.js";
 import User          from "../../models/v2/User.js";
 import verifyToken   from "../../middleware/v1/authMiddleware.js";
+import PhotoAlbum from "../../models/v2/PhotoAlbum.js";
+import VideoAlbum from "../../models/v2/VideoAlbum.js";
+import Audio from "../../models/v2/Audio.js";
+import Document      from "../../models/v2/Document.js";
+import Message from "../../models/v2/Messages.js";
 
 const router = express.Router();
 const toId = v => new mongoose.Types.ObjectId(v);
@@ -215,6 +220,94 @@ router.get("/private", verifyToken, async (req, res) => {
     return res.json({ stars });
   } catch (err) {
     console.error("★ private error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/private-access", verifyToken, async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.userId);
+
+    // 1. DEDICATE sterren waar ik rechten op heb op de ster zelf
+    const dedicateStars = await Star.find({
+      starFor: "dedicate",
+      $or: [{ userId }, { canView: userId }, { canEdit: userId }],
+    }).lean();
+
+    // 2. MYSELF sterren waar ik geen sterrechten op heb, maar wél op content
+    const myselfStars = await Star.find({
+      starFor: "myself",
+    }).lean();
+
+    const myselfStarIds = myselfStars.map((s) => s._id);
+
+    // Laad alle content-items per type voor deze sterren
+    const [photoAlbums, videoAlbums, audios, documents, messages] = await Promise.all([
+      mongoose.connection.collection("photoalbums").find({ starId: { $in: myselfStarIds } }).toArray(),
+      mongoose.connection.collection("videoalbums").find({ starId: { $in: myselfStarIds } }).toArray(),
+      mongoose.connection.collection("audios").find({ starId: { $in: myselfStarIds } }).toArray(),
+      mongoose.connection.collection("documents").find({ starId: { $in: myselfStarIds } }).toArray(),
+      mongoose.connection.collection("messages").find({ starId: { $in: myselfStarIds } }).toArray(),
+    ]);
+
+    // Helper: maak rights object per sterId
+    const rightsMap = {};
+
+    const processItems = (items, field) => {
+      items.forEach((item) => {
+        const sid = String(item.starId);
+        const hasAccess =
+          (item.canView || []).map(String).includes(String(userId)) ||
+          (item.canEdit || []).map(String).includes(String(userId));
+
+        if (!rightsMap[sid]) {
+          rightsMap[sid] = {
+            canViewPhotos: false,
+            canViewVideos: false,
+            canViewAudios: false,
+            canViewDocuments: false,
+            canViewMessages: false,
+          };
+        }
+
+        if (hasAccess) {
+          rightsMap[sid][field] = true;
+        }
+      });
+    };
+
+    processItems(photoAlbums, "canViewPhotos");
+    processItems(videoAlbums, "canViewVideos");
+    processItems(audios, "canViewAudios");
+    processItems(documents, "canViewDocuments");
+    processItems(messages, "canViewMessages");
+
+    // Filter enkel sterren waar je op min 1 contenttype toegang hebt
+    const filteredMyselfStars = myselfStars
+      .filter((s) => rightsMap[String(s._id)] && Object.values(rightsMap[String(s._id)]).includes(true))
+      .map((s) => ({
+        ...s,
+        rights: rightsMap[String(s._id)],
+      }));
+
+    // Voeg de dedicate sterren toe met volledige rechten
+    const mappedDedicateStars = dedicateStars.map((s) => ({
+      ...s,
+      rights: {
+        canViewPhotos: true,
+        canViewVideos: true,
+        canViewAudios: true,
+        canViewDocuments: true,
+        canViewMessages: true,
+      },
+    }));
+
+    // Combineer en stuur terug
+    const allStars = [...mappedDedicateStars, ...filteredMyselfStars];
+
+    return res.json({ stars: allStars });
+  } catch (err) {
+    console.error("★ private-access error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 });
