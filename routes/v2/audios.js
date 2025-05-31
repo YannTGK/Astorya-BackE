@@ -144,28 +144,41 @@ router.post(
 
 
 // GET /stars/:starId/audios
-// list audios if star-level view rights
+// lijst alle audiobestanden waar user toegang tot heeft (via ster of audio zelf)
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
+  const userId = String(req.user.userId);
+
   try {
-    const star = await loadStarWithView(starId, req.user.userId);
-    if (!star) {
-      return res.status(404).json({ message: 'Star not found or forbidden' });
+    const audios = await Audio.find({ starId });
+
+    const filtered = [];
+    for (const audio of audios) {
+      const star = await Star.findById(audio.starId);
+      if (!star) continue;
+
+      const isOwner      = String(star.userId) === userId;
+      const starCanView  = (star.canView || []).map(String).includes(userId);
+      const starCanEdit  = (star.canEdit || []).map(String).includes(userId);
+      const audioCanView = (audio.canView || []).map(String).includes(userId);
+      const audioCanEdit = (audio.canEdit || []).map(String).includes(userId);
+
+      const canAccess = isOwner || starCanView || starCanEdit || audioCanView || audioCanEdit;
+
+      if (canAccess) {
+        filtered.push({
+          _id:         audio._id,
+          title:       audio.title,
+          description: audio.description,
+          url:         await presign(audio.key, 3600),
+          canView:     audio.canView,
+          canEdit:     audio.canEdit,
+          addedAt:     audio.addedAt,
+        });
+      }
     }
 
-    const audios = await Audio.find({ starId });
-    const out = await Promise.all(
-      audios.map(async a => ({
-        _id:         a._id,
-        title:       a.title,
-        description: a.description,
-        url:         await presign(a.key, 3600),
-        canView:     a.canView,
-        canEdit:     a.canEdit,
-        addedAt:     a.addedAt,
-      }))
-    );
-    res.json(out);
+    res.json(filtered);
   } catch (err) {
     console.error('[AUDIO LIST ERROR]', err);
     res.status(500).json({ message: 'Server error', error: err.message });
