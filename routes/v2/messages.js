@@ -53,21 +53,29 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-/* GET /stars/:starId/messages
- * List all messages if user has view rights on the star.
- */
 router.get('/', verifyToken, async (req, res) => {
   const { starId } = req.params;
+  const userId = req.user.userId;
 
   try {
-    const star = await loadStarWithAccess(starId, req.user.userId, false);
-    if (!star) {
-      return res.status(404).json({ message: 'Star not found or forbidden' });
-    }
+    const star = await Star.findById(starId);
+    const starCanView = star && (
+      String(star.userId) === userId ||
+      (Array.isArray(star.canView) && star.canView.map(String).includes(userId)) ||
+      (Array.isArray(star.canEdit) && star.canEdit.map(String).includes(userId))
+    );
 
-    const messages = await Message.find({ starId });
-    res.json(messages);
+    const allMessages = await Message.find({ starId });
+
+    const accessibleMessages = allMessages.filter(msg => {
+      const isSender = String(msg.sender) === userId;
+      const canViewMsg = Array.isArray(msg.canView) && msg.canView.map(String).includes(userId);
+      return starCanView || isSender || canViewMsg;
+    });
+
+    res.json(accessibleMessages);
   } catch (err) {
+    console.error('[GET MESSAGES ERROR]', err);
     res.status(500).json({ message: 'Failed to retrieve messages', error: err.message });
   }
 });
