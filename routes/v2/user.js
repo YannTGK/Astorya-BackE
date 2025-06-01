@@ -173,21 +173,18 @@ router.delete("/:contactId/contacts", verifyToken, async (req, res) => {
  * 3.  STANDAARD CRUD
  *─────────────────────────────────────────────────────────────*/
 
-/** GET – alle users (later admin-only) */
-router.get("/", verifyToken, async (_, res) => {
-  try {
-    const users = await User.find().select("-password");
-    return res.json(users);
-  } catch (err) {
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
 /** GET – één user op ID */
 router.get("/:id", verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password");
+    const isOwnProfile = req.user.userId === req.params.id;
+    const selectFields = isOwnProfile
+      ? "-password"
+      : "username firstName lastName isAlive";
+
+    const user = await User.findById(req.params.id).select(selectFields);
+
     if (!user) return res.status(404).json({ message: "User not found" });
+
     return res.json(user);
   } catch (err) {
     return res.status(500).json({ message: "Server error" });
