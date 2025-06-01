@@ -2,9 +2,14 @@
 import express      from "express";
 import User         from "../../models/v2/User.js";
 import verifyToken  from "../../middleware/v1/authMiddleware.js";
+import DeathCertificate from "../../models/v2/DeathCertificate.js";
+import wasabi      from "../../utils/wasabiClient.js";
+import fs       from 'fs/promises';
+import multer from "multer";
+import path from "path";
 
 const router = express.Router();
-
+const upload = multer({ dest: "uploads/temp/" });
 /*─────────────────────────────────────────────────────────────*
  * HULPFUNCTIES
  *─────────────────────────────────────────────────────────────*/
@@ -62,12 +67,11 @@ router.get("/me/contacts", verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Activatie via activatiecode
-router.post("/activate", async (req, res) => {
+router.post("/activate", upload.single("certificate"), async (req, res) => {
   const { activationCode, dod } = req.body;
 
-  if (!activationCode) {
-    return res.status(400).json({ message: "Activation code is required" });
+  if (!activationCode || !req.file) {
+    return res.status(400).json({ message: "Activation code and certificate are required" });
   }
 
   try {
@@ -83,7 +87,6 @@ router.post("/activate", async (req, res) => {
 
     user.isAlive = false;
 
-    // Voeg optioneel dod toe als geldig formaat
     if (dod) {
       const parsedDate = new Date(dod);
       if (isNaN(parsedDate)) {
@@ -94,8 +97,26 @@ router.post("/activate", async (req, res) => {
 
     await user.save();
 
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const key = `certificates/${user._id}_${Date.now()}${ext}`;
+
+    const buffer = await fs.readFile(req.file.path);
+    await wasabi.upload({
+      Bucket: process.env.WASABI_BUCKET_NAME,
+      Key: key,
+      Body: buffer,
+      ContentType: req.file.mimetype,
+    }).promise();
+
+    await fs.unlink(req.file.path).catch(() => {});
+
+    await DeathCertificate.create({
+      userId: user._id,
+      fileKey: key,
+    });
+
     return res.json({
-      message: "User successfully deactivated",
+      message: "User successfully deactivated and certificate saved",
       userId: user._id,
       dod: user.dod || null,
     });
