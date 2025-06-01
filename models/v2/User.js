@@ -39,6 +39,12 @@ const userSchema = new mongoose.Schema(
 
     isAlive: { type: Boolean, default: true },
 
+    activationCode: {
+      type: String,
+      unique: true,
+      lowercase: true,
+    },
+
     plan: {
       type:    String,
       enum:    ["EXPLORER","PREMIUM","LEGACY"],
@@ -58,6 +64,24 @@ userSchema.index({ username: 1 });
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 10);
+
+  //activation code genereren als deze nog niet bestaat
+  if (!this.activationCode) {
+    const generateCode = async () => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let code;
+      let exists = true;
+  
+      while (exists) {
+        code = Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        exists = await mongoose.models.User.exists({ activationCode: code });
+      }
+  
+      return code;
+    };
+  
+    this.activationCode = await generateCode();
+  }
   next();
 });
 

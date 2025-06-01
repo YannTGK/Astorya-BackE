@@ -61,6 +61,51 @@ router.get("/me/contacts", verifyToken, async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 });
+
+// ✅ Activatie via activatiecode
+router.post("/activate", async (req, res) => {
+  const { activationCode, dod } = req.body;
+
+  if (!activationCode) {
+    return res.status(400).json({ message: "Activation code is required" });
+  }
+
+  try {
+    const user = await User.findOne({ activationCode });
+
+    if (!user) {
+      return res.status(404).json({ message: "Invalid activation code" });
+    }
+
+    if (!user.isAlive) {
+      return res.status(400).json({ message: "User is already deactivated" });
+    }
+
+    user.isAlive = false;
+
+    // Voeg optioneel dod toe als geldig formaat
+    if (dod) {
+      const parsedDate = new Date(dod);
+      if (isNaN(parsedDate)) {
+        return res.status(400).json({ message: "Invalid date format for dod" });
+      }
+      user.dod = parsedDate;
+    }
+
+    await user.save();
+
+    return res.json({
+      message: "User successfully deactivated",
+      userId: user._id,
+      dod: user.dod || null,
+    });
+  } catch (err) {
+    console.error("❌ Activation error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 /** 2b – voeg een contact toe  */
 router.post("/:contactId/contacts", verifyToken, async (req, res) => {
   const contactId = req.params.contactId;          // de persoon die je wilt toevoegen
