@@ -254,4 +254,32 @@ router.delete("/:id", verifyToken, async (req, res) => {
   }
 });
 
+/** PUT – wijzig wachtwoord */
+router.put("/me/password", verifyToken, async (req, res) => {
+  const userId = req.user.userId;
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({ message: "Both old and new passwords are required" });
+  }
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const isMatch = await user.comparePassword(oldPassword);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    user.password = newPassword; // wordt automatisch gehashed in pre('save')
+    await user.save();
+
+    return res.json({ message: "Password successfully updated" });
+  } catch (err) {
+    console.error("❌ Password update error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 export default router;
